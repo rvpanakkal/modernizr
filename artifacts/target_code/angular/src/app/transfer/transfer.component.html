@@ -1,0 +1,83 @@
+<!--
+  Modernized Angular Standalone Microfrontend Template
+  Traceability ID: GH-101
+-->
+<div class="transfer-card">
+  <div class="card-header">
+    <h2>Enterprise Fund Transfer</h2>
+    <span class="badge">Traceability: GH-101</span>
+  </div>
+
+  @if (successResponse(); as resp) {
+    <div class="alert alert-success">
+      <h4>Transfer Successful!</h4>
+      <p>{{ resp.message }}</p>
+      <small>Settlement Correlation: <code>{{ resp.correlationId }}</code></small>
+      <button class="btn btn-secondary" (click)="reset()">Make Another Transfer</button>
+    </div>
+  } @else {
+    <form (ngSubmit)="initiateTransfer()" class="transfer-form">
+      <div class="form-group">
+        <label for="srcAccount">Source Account ID</label>
+        <input
+          id="srcAccount"
+          type="text"
+          [value]="sourceAccountId()"
+          (input)="sourceAccountId.set($any($event.target).value)"
+          placeholder="e.g. ACC-1001"
+          class="form-control"
+          required
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="dstAccount">Destination Account ID</label>
+        <input
+          id="dstAccount"
+          type="text"
+          [value]="destinationAccountId()"
+          (input)="destinationAccountId.set($any($event.target).value)"
+          placeholder="e.g. ACC-2002"
+          class="form-control"
+          required
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="amount">Amount ($)</label>
+        <input
+          id="amount"
+          type="number"
+          step="0.01"
+          [value]="amount() ?? ''"
+          (input)="amount.set($any($event.target).value ? +$any($event.target).value : null)"
+          placeholder="0.00"
+          class="form-control"
+          required
+        />
+        @if (exceedsCeiling()) {
+          <div class="validation-error">Amount exceeds the daily limit ceiling of $50,000.00</div>
+        }
+      </div>
+
+      @if (errorMessage(); as err) {
+        <div class="alert alert-danger">{ err }</div>
+      }
+
+      <div class="form-actions">
+        <button
+          type="submit"
+          class="btn btn-primary"
+          [disabled]="!isValid() || submitting()"
+        >
+          @if (submitting()) {
+            <span>Settling via CICS...</span>
+          } @else {
+            <span>Submit Transfer</span>
+          }
+        </button>
+        <button type="button" class="btn btn-secondary" (click)="reset()" [disabled]="submitting()">Reset</button>
+      </div>
+    </form>
+  }
+</div>

@@ -1,0 +1,165 @@
+{
+  "feature_name": "Fund Transfer & Settlement Management",
+  "domain": "Retail Banking / Core Payments",
+  "business_summary": "Modernized Fund Transfer Service replacing legacy JSF TransferManagedBean and EJB TransferProcessingService. Implements strict two-party fund movement with positive-amount validation, balance threshold enforcement, active account compliance, and atomic CICS mainframe gateway settlement (TX9021).",
+  "business_rules": [
+    {
+      "rule_id": "BR-001",
+      "description": "Transfer amount must be strictly positive",
+      "rule_type": "VALIDATION",
+      "condition": "Transfer request initiated with amount parameter",
+      "action_or_outcome": "Validate amount > 0.00; reject with validation error if amount <= 0.00 or null",
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer"
+      ]
+    },
+    {
+      "rule_id": "BR-002",
+      "description": "Source account must exist in ledger and be in active standing",
+      "rule_type": "COMPLIANCE",
+      "condition": "Transfer request with source account identifier",
+      "action_or_outcome": "Verify account exists in AccountRepository and status == 'ACTIVE'; reject if inactive or missing",
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.repository.AccountRepository.findById"
+      ]
+    },
+    {
+      "rule_id": "BR-003",
+      "description": "Source account must possess sufficient available funds",
+      "rule_type": "THRESHOLD",
+      "condition": "Source account balance is evaluated against requested transfer amount",
+      "action_or_outcome": "Verify account balance >= transfer amount; reject with insufficient funds error if balance < amount",
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer"
+      ]
+    },
+    {
+      "rule_id": "BR-004",
+      "description": "Daily cumulative transfer limit ceiling of $50,000.00",
+      "rule_type": "THRESHOLD",
+      "condition": "Transfer amount exceeds single-transaction or daily cumulative cap",
+      "action_or_outcome": "Enforce daily transfer limit ceiling of $50,000.00 per account per business day",
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.web.TransferManagedBean"
+      ]
+    },
+    {
+      "rule_id": "BR-005",
+      "description": "External settlement dispatch via CICS Transaction Gateway (TX9021)",
+      "rule_type": "ROUTING",
+      "condition": "All validations pass and balances verified",
+      "action_or_outcome": "Dispatch atomic fund settlement to CICS mainframe gateway using transaction code TX9021 and obtain correlation ID",
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.gateway.CicsMainframeGateway.executeTransfer"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "Successful fund transfer with CICS settlement",
+      "given": [
+        "A valid and active source account 'ACC-1001' with balance $5,000.00",
+        "A valid destination account 'ACC-2002' with status 'ACTIVE'",
+        "A requested transfer amount of $250.00 within the $50,000.00 daily limit ceiling"
+      ],
+      "when": "A fund transfer is submitted from 'ACC-1001' to 'ACC-2002' for $250.00",
+      "then": [
+        "The transaction should be dispatched to CICS mainframe gateway with transaction code TX9021",
+        "A settlement correlation ID must be received from the mainframe",
+        "The source account 'ACC-1001' balance should be updated to $4,750.00",
+        "The destination account 'ACC-2002' balance should be credited by $250.00",
+        "The transaction status returned to the caller should be SUCCESS"
+      ],
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.gateway.CicsMainframeGateway.executeTransfer",
+        "com.legacy.banking.repository.AccountRepository.updateBalance"
+      ]
+    },
+    {
+      "name": "Reject transfer when amount is zero or negative",
+      "given": [
+        "A registered source account 'ACC-1001'",
+        "An invalid transfer amount of $0.00 or negative amount"
+      ],
+      "when": "The transfer request is submitted with amount <= 0.00",
+      "then": [
+        "The request must be rejected with validation error 'Transfer amount must be greater than zero'",
+        "No ledger debit or credit operations must occur",
+        "No external CICS mainframe dispatch must be initiated"
+      ],
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer"
+      ]
+    },
+    {
+      "name": "Reject transfer when source account has insufficient balance",
+      "given": [
+        "An active source account 'ACC-1001' with balance $100.00",
+        "A valid destination account 'ACC-2002'"
+      ],
+      "when": "A fund transfer of $500.00 is requested",
+      "then": [
+        "The system must reject the transaction with error 'Insufficient funds'",
+        "No debit or credit operations should occur on either account"
+      ],
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.repository.AccountRepository.findById"
+      ]
+    },
+    {
+      "name": "Reject transfer exceeding daily ceiling limit of $50,000.00",
+      "given": [
+        "An active source account 'ACC-1001' with balance $100,000.00",
+        "A transfer request for $55,000.00"
+      ],
+      "when": "The fund transfer request is submitted",
+      "then": [
+        "The transaction must be rejected for exceeding the daily transfer limit ceiling of $50,000.00",
+        "A compliance audit event must be logged"
+      ],
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.web.TransferManagedBean.execute"
+      ]
+    },
+    {
+      "name": "Reject transfer when source account is not in active standing",
+      "given": [
+        "A source account 'ACC-1001' with status 'SUSPENDED' or 'FROZEN'",
+        "A destination account 'ACC-2002' with status 'ACTIVE'"
+      ],
+      "when": "A fund transfer of $100.00 is submitted",
+      "then": [
+        "The transaction must be rejected with compliance error 'Source account is not active'",
+        "No CICS settlement should be dispatched"
+      ],
+      "legacy_refs": [
+        "com.legacy.banking.service.TransferProcessingService.processTransfer",
+        "com.legacy.banking.repository.AccountRepository.findById"
+      ]
+    }
+  ],
+  "data_contract_fields": {
+    "sourceAccountId": "String - ISO 20022 compliant source account identifier",
+    "destinationAccountId": "String - Target account identifier",
+    "amount": "BigDecimal - Transaction monetary amount (precision 18, scale 2, strictly positive)",
+    "currency": "String - 3-letter ISO 4217 currency code (default: USD)",
+    "correlationId": "String - CICS host transaction correlation UUID",
+    "status": "String - Settlement status (PENDING, SETTLED, REJECTED)",
+    "dailyLimitCeiling": "BigDecimal - Daily account transfer threshold ($50,000.00)"
+  },
+  "legacy_traceability": {
+    "com.legacy.banking.web.TransferManagedBean.execute": "Presentation action entry point for initiating transfer requests",
+    "com.legacy.banking.service.TransferProcessingService.processTransfer": "Core transaction orchestration, validation, and settlement coordination",
+    "com.legacy.banking.gateway.CicsMainframeGateway.executeTransfer": "Mainframe settlement via CICS Transaction Gateway with transaction code TX9021",
+    "com.legacy.banking.repository.AccountRepository.findById": "Account entity retrieval and existence check",
+    "com.legacy.banking.repository.AccountRepository.updateBalance": "Local database ledger balance debit/credit updates post-settlement"
+  },
+  "jira_story_id": "MOD-101",
+  "run_id": "test-run-001"
+}

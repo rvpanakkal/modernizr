@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: Modernized Fund Transfer API
+  version: 1.0.0
+  description: >
+    Enterprise Core Banking Fund Transfer Microservice API.
+    Auto-synthesized from legacy Java EE Lossless Semantic Tree (LST) via Antigravity Modernization Factory.
+    Traceability ID: GH-101
+  contact:
+    name: Core Banking Architecture Team
+    email: architecture@enterprise.com
+servers:
+  - url: https://api.enterprise.com/v1
+    description: Production Gateway
+  - url: http://localhost:8080/v1
+    description: Local Development Environment
+
+paths:
+  /transfers:
+    post:
+      summary: Initiate and settle fund transfer
+      description: >
+        Executes atomic fund transfer between accounts with validation, balance checking,
+        daily ceiling enforcement ($50,000.00), and CICS settlement dispatch.
+        Traceability ID: GH-101
+      operationId: processTransfer
+      tags:
+        - Transfers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Transfer successfully processed and settled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400':
+          description: Validation error or insufficient available funds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Business invariant violation (e.g. inactive account, daily ceiling exceeded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: External settlement gateway (CICS) failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    TransferRequest:
+      type: object
+      required:
+        - sourceAccountId
+        - destinationAccountId
+        - amount
+      properties:
+        sourceAccountId:
+          type: string
+          example: 'ACC-1001'
+          description: Unique identifier of the debit source account
+        destinationAccountId:
+          type: string
+          example: 'ACC-2002'
+          description: Unique identifier of the credit destination account
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+          maximum: 50000.00
+          example: 250.00
+          description: Transfer amount (strictly positive, daily ceiling $50,000.00)
+    TransferResponse:
+      type: object
+      required:
+        - correlationId
+        - status
+        - message
+        - timestamp
+      properties:
+        correlationId:
+          type: string
+          format: uuid
+          example: 'c9bf9e57-1685-4c89-bafb-ff5af830be8a'
+        status:
+          type: string
+          enum: [SUCCESS, PENDING_SETTLEMENT, FAILED]
+          example: 'SUCCESS'
+        message:
+          type: string
+          example: 'Transfer settled successfully via CICS CTG'
+        timestamp:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      required:
+        - errorCode
+        - errorMessage
+        - timestamp
+      properties:
+        errorCode:
+          type: string
+          example: 'CEILING_EXCEEDED'
+        errorMessage:
+          type: string
+          example: 'Transfer exceeds the daily limit ceiling of $50,000.00'
+        timestamp:
+          type: string
+          format: date-time

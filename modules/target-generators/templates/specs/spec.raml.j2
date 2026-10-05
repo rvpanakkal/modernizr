@@ -1,0 +1,18 @@
+#%RAML 1.0
+title: Modernized {{ domain_name }} API
+version: v1
+baseUri: https://api.enterprise.com/{{ domain_name | lower }}
+annotationTypes:
+  traceabilityId: string
+
+(traceabilityId): {{ jira_story_id }}
+
+/{{ domain_name | lower }}s:
+  get:
+    description: Fetch list of {{ domain_name }} entities
+    responses:
+      200:
+        body:
+          application/json:
+            example: |
+              [{"id": 1, "status": "ACTIVE"}]

@@ -1,0 +1,33 @@
+package {{ package_name }}.web;
+
+import {{ package_name }}.domain.{{ entity_name }};
+import {{ package_name }}.service.{{ service_name }};
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import java.util.List;
+
+/**
+ * Modernized REST Controller generated for {{ entity_name }}
+ * Traceability ID: {{ jira_story_id }}
+ */
+@RestController
+@RequestMapping("/api/v1/{{ entity_name | lower }}s")
+public class {{ entity_name }}Controller {
+
+    private final {{ service_name }} {{ service_name | lower_first }};
+
+    public {{ entity_name }}Controller({{ service_name }} {{ service_name | lower_first }}) {
+        this.{{ service_name | lower_first }} = {{ service_name | lower_first }};
+    }
+
+    @GetMapping
+    public ResponseEntity<List<{{ entity_name }}>> getAll() {
+        return ResponseEntity.ok({{ service_name | lower_first }}.findAll());
+    }
+
+    @PostMapping
+    public ResponseEntity<{{ entity_name }}> create(@Valid @RequestBody {{ entity_name }} dto) {
+        return ResponseEntity.ok({{ service_name | lower_first }}.save(dto));
+    }
+}

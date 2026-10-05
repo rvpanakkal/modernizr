@@ -1,0 +1,14 @@
+{
+  "tracking_id": "LOCAL-RUN-LOCA",
+  "tracker_type": "local",
+  "feature_name": "Fund Transfer & Settlement Management",
+  "domain": "Retail Banking / Core Payments",
+  "spec_file": "artifacts\\generated_specs\\spec_run-local-cli-test.json",
+  "created_at": "2026-10-04T15:14:45.445071+00:00",
+  "status": "PENDING_APPROVAL",
+  "metadata": {
+    "business_rules_count": 5,
+    "scenarios_count": 5,
+    "traceability_count": 5
+  }
+}

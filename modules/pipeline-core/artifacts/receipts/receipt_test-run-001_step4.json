@@ -1,0 +1,54 @@
+{
+  "receipt_id": "aa8974fc-2638-49f9-b5e2-19295bb7f2f7",
+  "step_number": 4,
+  "step_name": "Spec Generation & Jira HITL Gate",
+  "jira_story_id": "MOD-101",
+  "input_pointers": [
+    {
+      "uri": "artifacts/raw_lst/com.legacy.banking.web.TransferManagedBean.json",
+      "sha256_hash": "2bc6351e512d70370dfdf188065c06aadfb962b33c47a31dc5576ee0c76e2f82",
+      "artifact_type": "GRAPH_SLICE",
+      "media_type": "application/json",
+      "size_bytes": 4216,
+      "metadata": {}
+    }
+  ],
+  "output_pointers": [
+    {
+      "uri": "artifacts\\generated_specs\\spec_test-run-001.json",
+      "sha256_hash": "fe3796afb77979033cdf748197f3533190932e2a118709f84a842c5465785ec6",
+      "artifact_type": "GENERATED_SPEC",
+      "media_type": "application/json",
+      "size_bytes": 8246,
+      "metadata": {}
+    }
+  ],
+  "status": "HITL_PENDING",
+  "hitl_approved": false,
+  "approved_by": null,
+  "approval_timestamp": null,
+  "started_at": "2026-10-04T12:06:18.084797Z",
+  "completed_at": "2026-10-04T12:06:18.084800Z",
+  "duration_ms": null,
+  "error_message": null,
+  "metrics": {
+    "business_rules_count": 5,
+    "scenarios_count": 5,
+    "data_contract_fields_count": 7,
+    "traceability_links_count": 5
+  },
+  "run_id": "test-run-001",
+  "objective": "Human-in-the-Loop review and sign-off required for Jira story MOD-101",
+  "locked_decisions": {
+    "jira_story_id": "MOD-101",
+    "feature_name": "Fund Transfer & Settlement Management",
+    "domain": "Retail Banking / Core Payments",
+    "spec_sha256": "fe3796afb77979033cdf748197f3533190932e2a118709f84a842c5465785ec6"
+  },
+  "non_goals": [
+    "Direct code generation without human sign-off",
+    "Modification of legacy mainframe schemas",
+    "Bypassing architectural review of daily ceiling limits ($50,000.00)"
+  ],
+  "next_step": "TargetCodeSynthesis"
+}

@@ -1,0 +1,51 @@
+# Environment & Configuration
+.env
+.env.local
+*.env
+
+# Java & Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+.mvn/
+mvnw
+mvnw.cmd
+.layrctl/
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.poetry/
+
+# Node & Frontend
+node_modules/
+dist/
+.angular/
+
+# Pipeline Extraction Artifact Dumps
+artifacts/raw_lst/*
+!artifacts/raw_lst/.gitkeep
+artifacts/receipts/*
+!artifacts/receipts/.gitkeep
+artifacts/generated_specs/*
+!artifacts/generated_specs/.gitkeep
+
+# IDEs & System Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

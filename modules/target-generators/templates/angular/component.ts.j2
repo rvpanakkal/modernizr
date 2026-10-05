@@ -1,0 +1,32 @@
+import { Component, signal, inject, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+/**
+ * Modernized Angular Standalone Component with Signals
+ * Traceability ID: {{ jira_story_id }}
+ */
+@Component({
+  selector: 'app-{{ component_name | lower }}',
+  standalone: true,
+  imports: [CommonModule],
+  templateUrl: './{{ component_name | lower }}.component.html',
+  styleUrls: ['./{{ component_name | lower }}.component.css']
+})
+export class {{ component_name }}Component implements OnInit {
+  readonly jiraId = '{{ jira_story_id }}';
+  readonly items = signal<any[]>([]);
+  readonly loading = signal<boolean>(false);
+
+  ngOnInit(): void {
+    this.loadData();
+  }
+
+  loadData(): void {
+    this.loading.set(true);
+    // Modern reactive state update via Angular Signal
+    setTimeout(() => {
+      this.items.set([{ id: 1, name: 'Sample {{ component_name }}' }]);
+      this.loading.set(false);
+    }, 500);
+  }
+}

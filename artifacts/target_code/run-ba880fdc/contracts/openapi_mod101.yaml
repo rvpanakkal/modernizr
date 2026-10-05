@@ -1,0 +1,79 @@
+openapi: 3.0.3
+info:
+  title: Enterprise Fund Transfer API
+  description: Modernized RESTful service replacing legacy Java EE TransferManagedBean and TransferProcessingService.
+  version: 1.0.0
+  x-jira-story: MOD-101
+paths:
+  /api/v1/transfers:
+    post:
+      summary: Execute atomic fund transfer
+      description: Debits source account and credits target account with CICS mainframe settlement.
+      operationId: executeTransfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Transfer executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400':
+          description: Business validation failure (BR-001, BR-002, BR-004)
+        '422':
+          description: Insufficient funds in account (BR-003)
+components:
+  schemas:
+    TransferRequest:
+      type: object
+      required:
+        - fromAccountId
+        - toAccountId
+        - amount
+      properties:
+        fromAccountId:
+          type: string
+          pattern: '^ACC-\\d{4,8}$'
+          example: 'ACC-10123'
+        toAccountId:
+          type: string
+          pattern: '^ACC-\\d{4,8}$'
+          example: 'ACC-90451'
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+          maximum: 50000.00
+          example: 1250.00
+        currency:
+          type: string
+          default: 'USD'
+          example: 'USD'
+    TransferResponse:
+      type: object
+      properties:
+        correlationId:
+          type: string
+          example: 'CORR-9d8a1f2c'
+        status:
+          type: string
+          example: 'COMPLETED'
+        fromAccountId:
+          type: string
+          example: 'ACC-10123'
+        toAccountId:
+          type: string
+          example: 'ACC-90451'
+        amount:
+          type: number
+          example: 1250.00
+        settledAt:
+          type: string
+          format: date-time
+        message:
+          type: string
