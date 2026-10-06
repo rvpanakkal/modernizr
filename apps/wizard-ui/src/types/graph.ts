@@ -2,55 +2,69 @@
  * TypeScript Contracts for Topology Discovery, NetworkX In-Memory Slicing, and Cytoscape Visualization.
  */
 
+export type LayerType = 'PRESENTATION' | 'API' | 'SERVICE' | 'INTEGRATION' | 'DATA' | 'UTIL';
+
 export interface EntryPoint {
   fqn: string;
-  simple_name: string;
-  layer: string; // Presentation, API, Service, Integration
-  role: string;
-  kind: string;
-  annotations: string[];
-  injected_dependencies: string[];
-  description: string;
+  class_name: string;
+  layer: LayerType;
+  framework_marker: string; // e.g. "@ManagedBean", "@Path", "@RestController"
+  method_count: number;
+  line_count: number;
+  // Backward compatibility / optional properties
+  simple_name?: string;
+  role?: string;
+  kind?: string;
+  annotations?: string[];
+  injected_dependencies?: string[];
+  description?: string;
 }
 
 export interface GraphNode {
-  id: string;
-  name: string;
-  label?: string;
-  fqn: string;
-  role: string;
-  layer: string;
-  color: string;
-  annotations: string[];
+  id: string; // FQN
+  label: string; // Class / Component Name
+  layer: LayerType;
+  file_path: string;
+  start_line: number;
+  end_line: number;
   methods: string[];
-  file_path?: string;
-  start_line?: number;
-  end_line?: number;
+  annotations: string[];
+  // Additional / UI properties
+  name?: string;
+  role?: string;
+  color?: string;
   source_code?: string;
+  fqn?: string;
 }
 
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  type: string; // INJECTS, CALLS, CONNECTS_TO
-  label: string;
-  relationship?: string;
+  relationship: 'CALLS' | 'INJECTS' | 'USES' | 'EXTENDS';
+  // Additional / UI properties
+  type?: string;
+  label?: string;
 }
 
-export interface SliceResponse {
-  slice_id: string;
+export interface VerticalSliceResponse {
   entry_fqn: string;
   max_depth: number;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
   total_nodes: number;
   total_edges: number;
-  execution_paths: string[];
-  component_summary: Array<{ fqn: string; role: string; layer: string }>;
   estimated_tokens: number;
-  max_tokens: number;
   within_budget: boolean;
-  legacy_source: string;
-  raw_slice: any;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  aggregated_source_preview?: string;
+  // Compatibility / pipeline fields
+  slice_id?: string;
+  execution_paths?: string[];
+  component_summary?: Array<{ fqn: string; role: string; layer: string; methods_count?: number }>;
+  max_tokens?: number;
+  legacy_source?: string;
+  raw_slice?: any;
 }
+
+// Backward-compatible alias
+export type SliceResponse = VerticalSliceResponse;

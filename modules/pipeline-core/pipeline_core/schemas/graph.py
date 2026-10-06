@@ -73,13 +73,33 @@ class LSTGraphData(BaseModel):
 
 class EntryPoint(BaseModel):
     fqn: str
-    simple_name: str
-    layer: str = Field(description="Presentation, API, Integration, etc.")
-    role: str
+    class_name: str = ""
+    simple_name: str = ""
+    layer: str = Field(default="PRESENTATION", description="PRESENTATION, API, SERVICE, INTEGRATION, DATA, UTIL")
+    framework_marker: str = ""
+    method_count: int = 0
+    line_count: int = 0
+    role: str = ""
     kind: str = "CLASS"
     annotations: List[str] = Field(default_factory=list)
     injected_dependencies: List[str] = Field(default_factory=list)
     description: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.class_name and self.simple_name:
+            self.class_name = self.simple_name
+        elif not self.simple_name and self.class_name:
+            self.simple_name = self.class_name
+        if not self.framework_marker:
+            for ann in self.annotations:
+                cleaned = ann.lstrip("@")
+                if cleaned in ("ManagedBean", "Controller", "RestController", "Path", "Stateless", "WebFilter"):
+                    self.framework_marker = f"@{cleaned}"
+                    break
+            if not self.framework_marker and self.annotations:
+                self.framework_marker = self.annotations[0] if self.annotations[0].startswith("@") else f"@{self.annotations[0]}"
+            elif not self.framework_marker:
+                self.framework_marker = "@ManagedBean"
 
 
 # Alias for backward-compatibility with existing router
@@ -105,6 +125,7 @@ class SliceResponse(BaseModel):
     max_tokens: int = 6000
     within_budget: bool = True
     legacy_source: str = ""
+    aggregated_source_preview: Optional[str] = None
     raw_slice: Dict[str, Any] = Field(default_factory=dict)
 
 

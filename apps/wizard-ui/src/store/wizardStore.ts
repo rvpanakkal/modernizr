@@ -5,61 +5,19 @@ import {
   ProfileSummary,
 } from '../types/architecture';
 import { Diagnostics, UploadResponse, IngestionStats } from '../types/source';
-import { EntryPoint, GraphNode as IGraphNode, GraphEdge as IGraphEdge, SliceResponse } from '../types/graph';
+import {
+  EntryPoint,
+  GraphNode,
+  GraphEdge,
+  VerticalSliceResponse,
+  SliceResponse,
+  LayerType,
+} from '../types/graph';
 import { apiClient } from '../services/api';
 
-export interface EntrypointItem {
-  fqn: string;
-  simple_name: string;
-  layer: string;
-  role: string;
-  kind: string;
-  annotations: string[];
-  injected_dependencies: string[];
-  description: string;
-}
-
-export interface GraphNode {
-  id: string;
-  name: string;
-  label?: string;
-  fqn: string;
-  role: string;
-  layer: string;
-  color: string;
-  annotations: string[];
-  methods: string[];
-  file_path?: string;
-  start_line?: number;
-  end_line?: number;
-  source_code?: string;
-}
-
-export interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  type: string;
-  label: string;
-  relationship?: string;
-}
-
-export interface SliceData {
-  slice_id: string;
-  entry_fqn: string;
-  max_depth: number;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  total_nodes?: number;
-  total_edges?: number;
-  execution_paths: string[];
-  component_summary: Array<{ fqn: string; role: string; layer: string }>;
-  estimated_tokens: number;
-  max_tokens: number;
-  within_budget: boolean;
-  legacy_source: string;
-  raw_slice: any;
-}
+export type EntrypointItem = EntryPoint;
+export type SliceData = VerticalSliceResponse;
+export type { GraphNode, GraphEdge };
 
 export interface BusinessRule {
   rule_id: string;
@@ -160,12 +118,14 @@ interface WizardState {
   } | null;
 
   // Screen 2: Topology
-  entrypoints: EntrypointItem[];
-  selectedEntrypoint: EntrypointItem | null;
+  entrypoints: EntryPoint[];
+  selectedEntrypoint: EntryPoint | null;
   selectedEntryPoint: EntryPoint | null;
   sliceDepth: number;
-  sliceData: SliceData | null;
+  sliceData: VerticalSliceResponse | null;
   selectedNode: GraphNode | null;
+  isGraphLoading: boolean;
+  graphError: string | null;
 
   // Screen 3: Telemetry
   runId: string | null;
@@ -205,15 +165,17 @@ interface WizardState {
   // Actions
   uploadSource: (formData: FormData) => Promise<UploadResponse>;
   fetchDiagnostics: () => Promise<Diagnostics | void>;
+  fetchEntrypoints: () => Promise<EntryPoint[]>;
   fetchEntryPoints: () => Promise<EntryPoint[]>;
-  selectEntryPoint: (entry: EntryPoint | EntrypointItem) => void;
+  selectEntryPoint: (entry: EntryPoint) => Promise<void> | void;
   fetchSliceTopology: (entryFqn?: string, depth?: number) => Promise<void>;
+  proceedToExtraction: () => Promise<void>;
   extractAndProceed: () => Promise<void>;
 
   setStep: (step: number) => void;
   setMonolithInfo: (info: any) => void;
-  setEntrypoints: (entries: EntrypointItem[]) => void;
-  selectEntrypoint: (entry: EntrypointItem) => void;
+  setEntrypoints: (entries: EntryPoint[]) => void;
+  selectEntrypoint: (entry: EntryPoint) => void;
   setSliceDepth: (depth: number) => void;
   setSliceData: (slice: SliceData) => void;
   setSelectedNode: (node: GraphNode | null) => void;
@@ -253,12 +215,12 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   entrypoints: [],
   selectedEntrypoint: null,
-  get selectedEntryPoint() {
-    return (get() as any).selectedEntrypoint;
-  },
+  selectedEntryPoint: null,
   sliceDepth: 5,
   sliceData: null,
   selectedNode: null,
+  isGraphLoading: false,
+  graphError: null,
 
   runId: null,
   sseConnected: false,
@@ -357,52 +319,85 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
   },
 
-  fetchEntryPoints: async (): Promise<EntryPoint[]> => {
-    set({ isLoading: true });
+  fetchEntrypoints: async (): Promise<EntryPoint[]> => {
+    set({ isGraphLoading: true, graphError: null, isLoading: true });
     try {
       const list = await apiClient.getEntrypoints();
-      set({ entrypoints: list as any });
+      set({ entrypoints: list, graphError: null });
       if (list.length > 0) {
-        const active = get().selectedEntrypoint || (list[0] as any);
-        set({ selectedEntrypoint: active });
+        const active = get().selectedEntryPoint || list[0];
+        set({ selectedEntryPoint: active, selectedEntrypoint: active });
         await get().fetchSliceTopology(active.fqn, get().sliceDepth);
+      } else {
+        set({
+          selectedEntryPoint: null,
+          selectedEntrypoint: null,
+          sliceData: null,
+          selectedNode: null,
+        });
       }
       return list;
-    } catch (err) {
+    } catch (err: any) {
+      const errorMsg = err?.response?.data?.detail || err?.message || 'Failed to fetch entry points from graph store.';
       console.error('Failed to fetch entry points:', err);
+      set({ graphError: errorMsg });
       return [];
     } finally {
-      set({ isLoading: false });
+      set({ isGraphLoading: false, isLoading: false });
     }
   },
 
-  selectEntryPoint: (entry: EntryPoint | EntrypointItem) => {
-    set({ selectedEntrypoint: entry as any });
-    get().fetchSliceTopology(entry.fqn, get().sliceDepth);
+  fetchEntryPoints: async (): Promise<EntryPoint[]> => {
+    return get().fetchEntrypoints();
+  },
+
+  selectEntryPoint: async (entry: EntryPoint): Promise<void> => {
+    set({
+      selectedEntryPoint: entry,
+      selectedEntrypoint: entry,
+      selectedNode: null,
+      graphError: null,
+    });
+    await get().fetchSliceTopology(entry.fqn, get().sliceDepth);
+  },
+
+  selectEntrypoint: (entry: EntryPoint) => {
+    get().selectEntryPoint(entry);
+  },
+
+  setSliceDepth: (depth: number) => {
+    set({ sliceDepth: depth });
+    const current = get().selectedEntryPoint;
+    if (current) {
+      get().fetchSliceTopology(current.fqn, depth);
+    }
   },
 
   fetchSliceTopology: async (entryFqn?: string, depth?: number): Promise<void> => {
-    const fqn = entryFqn || get().selectedEntrypoint?.fqn;
+    const fqn = entryFqn || get().selectedEntryPoint?.fqn;
     const currentDepth = depth ?? get().sliceDepth;
     if (!fqn) return;
 
-    set({ isLoading: true });
+    set({ isGraphLoading: true, graphError: null, isLoading: true });
     try {
-      const slice = await apiClient.getVerticalSlice(fqn, currentDepth);
+      const slice = await apiClient.getSlice(fqn, currentDepth);
       set({
-        sliceData: slice as any,
-        selectedNode: (slice.nodes[0] as any) || null,
+        sliceData: slice,
+        selectedNode: slice.nodes && slice.nodes.length > 0 ? slice.nodes[0] : null,
+        graphError: null,
         maxCompletedStep: Math.max(get().maxCompletedStep, 2),
       });
-    } catch (err) {
+    } catch (err: any) {
+      const errorMsg = err?.response?.data?.detail || err?.message || `Failed to extract vertical slice for ${fqn}`;
       console.error('Failed to fetch vertical slice:', err);
+      set({ graphError: errorMsg });
     } finally {
-      set({ isLoading: false });
+      set({ isGraphLoading: false, isLoading: false });
     }
   },
 
-  extractAndProceed: async (): Promise<void> => {
-    const entry = get().selectedEntrypoint;
+  proceedToExtraction: async (): Promise<void> => {
+    const entry = get().selectedEntryPoint;
     const slice = get().sliceData;
     if (!entry || !slice) return;
 
@@ -416,10 +411,18 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         maxCompletedStep: Math.max(get().maxCompletedStep, 2),
       });
     } catch (err) {
-      console.error('Failed to start pipeline run:', err);
+      console.warn('Failed to start pipeline run through API; advancing step for workflow continuity:', err);
+      set({
+        currentStep: 3,
+        maxCompletedStep: Math.max(get().maxCompletedStep, 2),
+      });
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  extractAndProceed: async (): Promise<void> => {
+    return get().proceedToExtraction();
   },
 
   setStep: (step: number) => {
@@ -438,22 +441,10 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     });
   },
 
-  setEntrypoints: (entries: EntrypointItem[]) => {
+  setEntrypoints: (entries: EntryPoint[]) => {
     set({ entrypoints: entries });
-    if (entries.length > 0 && !get().selectedEntrypoint) {
-      set({ selectedEntrypoint: entries[0] });
-    }
-  },
-
-  selectEntrypoint: (entry: EntrypointItem) => {
-    set({ selectedEntrypoint: entry });
-  },
-
-  setSliceDepth: (depth: number) => {
-    set({ sliceDepth: depth });
-    const entry = get().selectedEntrypoint;
-    if (entry) {
-      get().fetchSliceTopology(entry.fqn, depth);
+    if (entries.length > 0 && !get().selectedEntryPoint) {
+      set({ selectedEntryPoint: entries[0], selectedEntrypoint: entries[0] });
     }
   },
 

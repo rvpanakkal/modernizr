@@ -333,14 +333,35 @@ class JsonGraphService:
 
                 role = attrs.get("role", "ENTRYPOINT")
                 simple_name = attrs.get("label", node_id.split(".")[-1])
+                layer_upper = layer.upper()
 
-                desc = f"{role.replace('_', ' ').title()} component ({layer.title()} layer) entry point."
+                # Determine framework marker
+                framework_marker = "@ManagedBean"
+                for ann in annotations:
+                    cleaned = ann.lstrip("@")
+                    if cleaned in ("ManagedBean", "Controller", "RestController", "Path", "Stateless", "WebFilter"):
+                        framework_marker = f"@{cleaned}"
+                        break
+                if framework_marker == "@ManagedBean" and annotations:
+                    framework_marker = annotations[0] if annotations[0].startswith("@") else f"@{annotations[0]}"
+
+                methods = attrs.get("methods", [])
+                method_count = len(methods)
+                start_l = attrs.get("start_line", 1) or 1
+                end_l = attrs.get("end_line", 30) or 30
+                line_count = max(1, end_l - start_l + 1)
+
+                desc = f"{role.replace('_', ' ').title()} component ({layer_upper} layer) entry point."
 
                 entrypoints.append(
                     EntryPoint(
                         fqn=node_id,
+                        class_name=simple_name,
                         simple_name=simple_name,
-                        layer=layer.title(),
+                        layer=layer_upper,
+                        framework_marker=framework_marker,
+                        method_count=method_count,
+                        line_count=line_count,
                         role=role,
                         kind="CLASS",
                         annotations=annotations,
@@ -351,7 +372,12 @@ class JsonGraphService:
 
         # Sort with PRESENTATION first, then API, then INTEGRATION
         def sort_key(ep: EntryPoint) -> Tuple[int, str]:
-            order = {"Presentation": 0, "Api": 1, "Service": 2, "Integration": 3}
+            order = {
+                "PRESENTATION": 0, "Presentation": 0,
+                "API": 1, "Api": 1,
+                "SERVICE": 2, "Service": 2,
+                "INTEGRATION": 3, "Integration": 3
+            }
             return (order.get(ep.layer, 9), ep.simple_name)
 
         entrypoints.sort(key=sort_key)
@@ -477,6 +503,7 @@ class JsonGraphService:
             max_tokens=6000,
             within_budget=within_budget,
             legacy_source=legacy_source,
+            aggregated_source_preview=legacy_source[:2000] if len(legacy_source) > 2000 else legacy_source,
             raw_slice={
                 "entry_fqn": target_fqn,
                 "node_count": len(nodes_out),
@@ -595,6 +622,7 @@ class JsonGraphService:
             max_tokens=6000,
             within_budget=True,
             legacy_source=f"// No component found matching {entry_fqn}",
+            aggregated_source_preview="",
             raw_slice={},
         )
 

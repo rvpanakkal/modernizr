@@ -7,7 +7,7 @@ import {
   ExtractedClassItem,
 } from '../types/architecture';
 import { Diagnostics, UploadResponse, IngestionStats } from '../types/source';
-import { EntryPoint, GraphNode, GraphEdge, SliceResponse } from '../types/graph';
+import { EntryPoint, GraphNode, GraphEdge, SliceResponse, VerticalSliceResponse } from '../types/graph';
 
 const isMockMode = import.meta.env.VITE_MOCK_MODE === 'true';
 
@@ -479,8 +479,12 @@ export const apiClient = {
       return [
         {
           fqn: 'com.enterprise.banking.TransferManagedBean',
+          class_name: 'TransferManagedBean',
           simple_name: 'TransferManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 11,
+          line_count: 55,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -489,8 +493,12 @@ export const apiClient = {
         },
         {
           fqn: 'com.legacy.banking.web.LoanApplicationManagedBean',
+          class_name: 'LoanApplicationManagedBean',
           simple_name: 'LoanApplicationManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 22,
+          line_count: 110,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -499,8 +507,12 @@ export const apiClient = {
         },
         {
           fqn: 'com.legacy.banking.web.AuthenticationManagedBean',
+          class_name: 'AuthenticationManagedBean',
           simple_name: 'AuthenticationManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 12,
+          line_count: 60,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -518,8 +530,12 @@ export const apiClient = {
       return [
         {
           fqn: 'com.enterprise.banking.TransferManagedBean',
+          class_name: 'TransferManagedBean',
           simple_name: 'TransferManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 11,
+          line_count: 55,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -528,8 +544,12 @@ export const apiClient = {
         },
         {
           fqn: 'com.legacy.banking.web.LoanApplicationManagedBean',
+          class_name: 'LoanApplicationManagedBean',
           simple_name: 'LoanApplicationManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 22,
+          line_count: 110,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -538,8 +558,12 @@ export const apiClient = {
         },
         {
           fqn: 'com.legacy.banking.web.AuthenticationManagedBean',
+          class_name: 'AuthenticationManagedBean',
           simple_name: 'AuthenticationManagedBean',
-          layer: 'Presentation',
+          layer: 'PRESENTATION',
+          framework_marker: '@ManagedBean',
+          method_count: 12,
+          line_count: 60,
           role: 'JSF_MANAGED_BEAN',
           kind: 'CLASS',
           annotations: ['@ManagedBean', '@SessionScoped'],
@@ -550,7 +574,11 @@ export const apiClient = {
     }
   },
 
-  async getVerticalSlice(entryFqn: string, maxDepth: number = 5): Promise<SliceResponse> {
+  async getSlice(entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> {
+    return this.getVerticalSlice(entryFqn, maxDepth);
+  },
+
+  async getVerticalSlice(entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> {
     if (isMockMode) {
       return {
         slice_id: entryFqn,
@@ -559,6 +587,7 @@ export const apiClient = {
         nodes: [
           {
             id: 'com.enterprise.banking.TransferManagedBean',
+            label: 'TransferManagedBean',
             name: 'TransferManagedBean',
             fqn: 'com.enterprise.banking.TransferManagedBean',
             layer: 'PRESENTATION',
@@ -573,6 +602,7 @@ export const apiClient = {
           },
           {
             id: 'com.enterprise.banking.TransferProcessingService',
+            label: 'TransferProcessingService',
             name: 'TransferProcessingService',
             fqn: 'com.enterprise.banking.TransferProcessingService',
             layer: 'SERVICE',
@@ -587,6 +617,7 @@ export const apiClient = {
           },
           {
             id: 'com.enterprise.banking.AccountRepository',
+            label: 'AccountRepository',
             name: 'AccountRepository',
             fqn: 'com.enterprise.banking.AccountRepository',
             layer: 'DATA',
@@ -601,6 +632,7 @@ export const apiClient = {
           },
           {
             id: 'com.enterprise.banking.CicsMainframeGateway',
+            label: 'CicsMainframeGateway',
             name: 'CicsMainframeGateway',
             fqn: 'com.enterprise.banking.CicsMainframeGateway',
             layer: 'INTEGRATION',
@@ -615,6 +647,7 @@ export const apiClient = {
           },
           {
             id: 'com.enterprise.banking.Account',
+            label: 'Account',
             name: 'Account',
             fqn: 'com.enterprise.banking.Account',
             layer: 'DATA',
@@ -633,6 +666,7 @@ export const apiClient = {
             id: 'edge-1',
             source: 'com.enterprise.banking.TransferManagedBean',
             target: 'com.enterprise.banking.TransferProcessingService',
+            relationship: 'INJECTS',
             type: 'INJECTS',
             label: 'INJECTS',
           },
@@ -640,6 +674,7 @@ export const apiClient = {
             id: 'edge-2',
             source: 'com.enterprise.banking.TransferProcessingService',
             target: 'com.enterprise.banking.AccountRepository',
+            relationship: 'INJECTS',
             type: 'INJECTS',
             label: 'INJECTS',
           },
@@ -647,6 +682,7 @@ export const apiClient = {
             id: 'edge-3',
             source: 'com.enterprise.banking.TransferProcessingService',
             target: 'com.enterprise.banking.CicsMainframeGateway',
+            relationship: 'INJECTS',
             type: 'INJECTS',
             label: 'INJECTS',
           },
@@ -654,6 +690,7 @@ export const apiClient = {
             id: 'edge-4',
             source: 'com.enterprise.banking.AccountRepository',
             target: 'com.enterprise.banking.Account',
+            relationship: 'CALLS',
             type: 'CALLS',
             label: 'CALLS',
           },
@@ -687,6 +724,7 @@ export const apiClient = {
       return res.data;
     } catch (err) {
       console.warn('[apiClient] getVerticalSlice failed; returning mock slice', err);
+      const simpleName = entryFqn.split('.').pop() || 'EntryClass';
       return {
         slice_id: entryFqn,
         entry_fqn: entryFqn,
@@ -694,11 +732,15 @@ export const apiClient = {
         nodes: [
           {
             id: entryFqn,
-            name: entryFqn.split('.').pop() || 'EntryClass',
+            label: simpleName,
+            name: simpleName,
             fqn: entryFqn,
             layer: 'PRESENTATION',
             role: 'JSF_MANAGED_BEAN',
             color: '#3b82f6',
+            file_path: `src/main/java/${entryFqn.replace(/\\./g, '/')}.java`,
+            start_line: 1,
+            end_line: 50,
             annotations: ['@ManagedBean'],
             methods: ['execute'],
           },
@@ -880,3 +922,9 @@ export const apiClient = {
     return res.data;
   },
 };
+
+// Standalone exports for Screen 2 and graph topology
+export const getEntrypoints = (): Promise<EntryPoint[]> => apiClient.getEntrypoints();
+export const getSlice = (entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> => apiClient.getSlice(entryFqn, maxDepth);
+export const getVerticalSlice = (entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> => apiClient.getVerticalSlice(entryFqn, maxDepth);
+

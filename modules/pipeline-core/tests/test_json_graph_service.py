@@ -34,7 +34,7 @@ def test_entrypoint_discovery(graph_service):
     assert any("TransferManagedBean" in f for f in fqns)
     # Check layers
     layers = [ep.layer for ep in entrypoints]
-    assert "Presentation" in layers
+    assert "PRESENTATION" in layers
 
 
 def test_vertical_slice_bfs_traversal(graph_service):
