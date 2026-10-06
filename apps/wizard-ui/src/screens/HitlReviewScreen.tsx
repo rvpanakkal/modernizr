@@ -14,6 +14,8 @@ import {
   MessageSquare,
   ListTree,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 export const HitlReviewScreen: React.FC = () => {
@@ -27,6 +29,7 @@ export const HitlReviewScreen: React.FC = () => {
     hitlApproved,
     approvedBy,
     jiraStoryId,
+    activeProfile,
     setSpecData,
     updateSpecData,
     setHighlightedLines,
@@ -38,6 +41,7 @@ export const HitlReviewScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [showArchUnitRules, setShowArchUnitRules] = useState(false);
   const [revisionFeedback, setRevisionFeedback] = useState('');
   const [approverName, setApproverName] = useState('Enterprise Lead Architect');
   const [editableSpecText, setEditableSpecText] = useState('');
@@ -213,6 +217,84 @@ export const HitlReviewScreen: React.FC = () => {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Architecture Governance & Invariant Rules Bar */}
+      <div className="flex flex-col gap-2 p-3 bg-slate-900 border border-slate-800 rounded-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Governance Badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Target Profile: {activeProfile?.name || 'Enterprise-Spring-Boot-3.5-Standard'}</span>
+            </span>
+
+            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-950 text-sky-300 border border-slate-800">
+              Pkg: {activeProfile?.base_package_pattern || 'com.enterprise.{domain}.v2'}
+            </span>
+
+            {activeProfile?.sha256_hash && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-slate-950 text-slate-400 border border-slate-800">
+                <span className="text-slate-500">SHA-256:</span>
+                <span className="text-slate-300 font-bold">
+                  {activeProfile.sha256_hash.slice(0, 10)}...
+                </span>
+              </span>
+            )}
+          </div>
+
+          {/* ArchUnit Accordion Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowArchUnitRules(!showArchUnitRules)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 text-sky-400" />
+            <span>
+              {showArchUnitRules
+                ? 'Hide Architecture Invariants'
+                : `Enforced Invariants (${activeProfile?.conformance_rules?.length || 4} ArchUnit Rules)`}
+            </span>
+            {showArchUnitRules ? (
+              <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+            )}
+          </button>
+        </div>
+
+        {/* ArchUnit Rules Accordion / Drawer */}
+        {showArchUnitRules && (
+          <div className="mt-2 pt-3 border-t border-slate-800/80 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span className="font-semibold text-slate-200">
+                Step 5.5 ArchUnit Conformance Gate Invariants
+              </span>
+              <span>All target classes must satisfy these deterministic assertions</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {(activeProfile?.conformance_rules || []).map((rule) => (
+                <div
+                  key={rule.rule_id}
+                  className="p-3 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-950 text-sky-300 border border-sky-800">
+                      {rule.rule_id}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-500 truncate max-w-[200px]">
+                      {rule.test_method_name}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-200">{rule.description}</p>
+                  <pre className="p-1.5 bg-slate-900 rounded text-[10px] font-mono text-emerald-400 overflow-x-auto border border-slate-800/80">
+                    {rule.rule_code}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {notification && (

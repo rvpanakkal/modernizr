@@ -1,4 +1,11 @@
 import axios from 'axios';
+import {
+  ArchitectureProfile,
+  HarvestReferencePayload,
+  ProfileSummary,
+} from '../types/architecture';
+
+const isMockMode = import.meta.env.VITE_MOCK_MODE === 'true';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '',
@@ -6,6 +13,201 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Fallback Mock Profiles when in mock mode or backend is unreachable
+const MOCK_PROFILES: ArchitectureProfile[] = [
+  {
+    profile_id: 'arch-payments-v2',
+    name: 'Enterprise Reference Payments & Accounts Microservice',
+    target_runtime: 'Java 21 / Spring Boot 3.5.0',
+    created_at: new Date().toISOString(),
+    base_package_pattern: 'com.enterprise.{domain}.v2',
+    layering_pattern: 'CONTROLLER_SERVICE_REPOSITORY',
+    build_file_template: `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.0</version>
+  </parent>
+  <groupId>{{GROUP_ID}}</groupId>
+  <artifactId>{{ARTIFACT_ID}}</artifactId>
+  <name>{{PROJECT_NAME}}</name>
+</project>`,
+    required_dependencies: [
+      'org.springframework.boot:spring-boot-starter-web',
+      'org.springframework.boot:spring-boot-starter-validation',
+      'org.springframework.boot:spring-boot-starter-actuator',
+      'com.tngtech.archunit:archunit-junit5',
+    ],
+    exemplars: [
+      {
+        pattern_name: 'RestController',
+        target_layer: 'controller',
+        annotations_matched: ['@RestController', '@RequestMapping'],
+        code_snippet: `package com.enterprise.reference.controller;
+
+import com.enterprise.reference.service.AccountService;
+import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping(path = "/api/v1/accounts", produces = MediaType.APPLICATION_JSON_VALUE)
+public class SampleAccountController {
+
+    private final AccountService accountService;
+
+    public SampleAccountController(AccountService accountService) {
+        this.accountService = accountService;
+    }
+
+    @GetMapping("/{accountId}")
+    public ResponseEntity<AccountResponse> getAccount(@PathVariable String accountId) {
+        return ResponseEntity.ok(accountService.getAccount(accountId));
+    }
+}`,
+        origin_file: 'src/main/java/com/enterprise/reference/controller/SampleAccountController.java',
+      },
+      {
+        pattern_name: 'GlobalExceptionHandler',
+        target_layer: 'controller',
+        annotations_matched: ['@RestControllerAdvice'],
+        code_snippet: `package com.enterprise.reference.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.net.URI;
+import java.time.Instant;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Validation Invariant Failure");
+        problem.setType(URI.create("urn:problem:validation-error"));
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+}`,
+        origin_file: 'src/main/java/com/enterprise/reference/exception/GlobalExceptionHandler.java',
+      },
+      {
+        pattern_name: 'Service',
+        target_layer: 'service',
+        annotations_matched: ['@Service', '@Transactional'],
+        code_snippet: `package com.enterprise.reference.service;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+public class AccountService {
+
+    @Transactional(readOnly = true)
+    public AccountResponse getAccount(String accountId) {
+        return new AccountResponse(accountId, "Enterprise Customer", balance, "ACTIVE");
+    }
+}`,
+        origin_file: 'src/main/java/com/enterprise/reference/service/AccountService.java',
+      },
+    ],
+    conformance_rules: [
+      {
+        rule_id: 'ARCH-001',
+        description: 'Controllers must only access Services and must not depend directly on Repositories.',
+        test_method_name: 'controllers_should_not_access_repositories_directly',
+        rule_code: 'noClasses().that().resideInAPackage("..controller..").should().dependOnClassesThat().resideInAPackage("..repository..")',
+      },
+      {
+        rule_id: 'ARCH-002',
+        description: 'Domain services must declare Spring Service or Transactional boundaries.',
+        test_method_name: 'services_should_be_annotated_with_service_or_transactional',
+        rule_code: 'classes().that().resideInAPackage("..service..").should().beAnnotatedWith(Service.class)',
+      },
+      {
+        rule_id: 'ARCH-003',
+        description: 'Domain JPA/persistence entities must not be accessed directly by presentation controllers.',
+        test_method_name: 'controllers_should_not_access_entities_directly',
+        rule_code: 'noClasses().that().resideInAPackage("..controller..").should().dependOnClassesThat().resideInAPackage("..domain..")',
+      },
+      {
+        rule_id: 'ARCH-004',
+        description: 'Classes in controller packages must have names ending with Controller.',
+        test_method_name: 'controller_classes_should_be_named_ending_with_controller',
+        rule_code: 'classes().that().resideInAPackage("..controller..").should().haveSimpleNameEndingWith("Controller")',
+      },
+    ],
+    sha256_hash: '7eb5cf7cb39ef7925b8fe129f58a197a5e16acce8005fcf3af7fca761b273af2',
+  },
+  {
+    profile_id: 'arch-hexagonal-core-v1',
+    name: 'Enterprise Hexagonal Ports & Adapters Archetype',
+    target_runtime: 'Java 21 / Spring Boot 3.5.0',
+    created_at: new Date().toISOString(),
+    base_package_pattern: 'com.enterprise.core.{domain}',
+    layering_pattern: 'HEXAGONAL',
+    build_file_template: `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.0</version>
+  </parent>
+  <groupId>{{GROUP_ID}}</groupId>
+  <artifactId>{{ARTIFACT_ID}}</artifactId>
+  <name>{{PROJECT_NAME}}</name>
+</project>`,
+    required_dependencies: [
+      'org.springframework.boot:spring-boot-starter-web',
+      'org.springframework.boot:spring-boot-starter-actuator',
+      'com.tngtech.archunit:archunit-junit5',
+    ],
+    exemplars: [
+      {
+        pattern_name: 'RestController',
+        target_layer: 'adapters',
+        annotations_matched: ['@RestController'],
+        code_snippet: `package com.enterprise.core.adapter.in.web;
+
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/v1/resources")
+public class ResourceAdapter {
+    // Primary Web Inbound Adapter
+}`,
+        origin_file: 'src/main/java/com/enterprise/core/adapter/in/web/ResourceAdapter.java',
+      },
+    ],
+    conformance_rules: [
+      {
+        rule_id: 'ARCH-HEX-001',
+        description: 'Domain core must never depend on external adapters or frameworks.',
+        test_method_name: 'domain_core_must_not_depend_on_adapters',
+        rule_code: 'noClasses().that().resideInAPackage("..domain..").should().dependOnClassesThat().resideInAPackage("..adapter..")',
+      },
+      {
+        rule_id: 'ARCH-HEX-002',
+        description: 'Inbound adapters must interact only through application use case input ports.',
+        test_method_name: 'inbound_adapters_must_use_ports',
+        rule_code: 'classes().that().resideInAPackage("..adapter.in..").should().dependOnClassesThat().resideInAPackage("..port.in..")',
+      },
+    ],
+    sha256_hash: '3d9a1c5e6b72f8401cde92a48b56f10328904712534a6bc891e23f0a719c8d45',
+  },
+];
+
+let activeProfileIdInMemory = 'arch-payments-v2';
 
 export const apiClient = {
   // Screen 1: Source Ingestion
@@ -83,5 +285,113 @@ export const apiClient = {
 
   getBundleDownloadUrl(runId: string): string {
     return `/api/synthesis/bundle/${runId}`;
+  },
+
+  // Target Architecture Provider Subsystem
+  async getArchitectureProfiles(): Promise<ProfileSummary[]> {
+    if (isMockMode) {
+      return MOCK_PROFILES.map((p) => ({
+        profile_id: p.profile_id,
+        name: p.name,
+        target_runtime: p.target_runtime,
+        layering_pattern: p.layering_pattern,
+        base_package_pattern: p.base_package_pattern,
+        created_at: p.created_at || new Date().toISOString(),
+        sha256_hash: p.sha256_hash,
+        exemplars_count: p.exemplars.length,
+        conformance_rules_count: p.conformance_rules.length,
+        is_active: p.profile_id === activeProfileIdInMemory,
+      }));
+    }
+
+    try {
+      const res = await api.get('/api/architecture/profiles');
+      return res.data;
+    } catch (err) {
+      console.warn('[apiClient] Fetch architecture profiles failed; using mock fallback', err);
+      return MOCK_PROFILES.map((p) => ({
+        profile_id: p.profile_id,
+        name: p.name,
+        target_runtime: p.target_runtime,
+        layering_pattern: p.layering_pattern,
+        base_package_pattern: p.base_package_pattern,
+        created_at: p.created_at || new Date().toISOString(),
+        sha256_hash: p.sha256_hash,
+        exemplars_count: p.exemplars.length,
+        conformance_rules_count: p.conformance_rules.length,
+        is_active: p.profile_id === activeProfileIdInMemory,
+      }));
+    }
+  },
+
+  async getArchitectureProfile(profileId: string): Promise<ArchitectureProfile> {
+    if (isMockMode) {
+      const match = MOCK_PROFILES.find((p) => p.profile_id === profileId) || MOCK_PROFILES[0];
+      return match;
+    }
+
+    try {
+      const res = await api.get(`/api/architecture/profiles/${profileId}`);
+      return res.data;
+    } catch (err) {
+      console.warn(`[apiClient] Fetch profile ${profileId} failed; using mock fallback`, err);
+      const match = MOCK_PROFILES.find((p) => p.profile_id === profileId) || MOCK_PROFILES[0];
+      return match;
+    }
+  },
+
+  async selectActiveArchitectureProfile(profileId: string): Promise<{ status: string; active_profile_id: string }> {
+    activeProfileIdInMemory = profileId;
+    if (isMockMode) {
+      return { status: 'SUCCESS', active_profile_id: profileId };
+    }
+
+    try {
+      const res = await api.post('/api/architecture/select-active', { profile_id: profileId });
+      return res.data;
+    } catch (err) {
+      console.warn('[apiClient] select-active failed; mock fallback applied', err);
+      return { status: 'SUCCESS', active_profile_id: profileId };
+    }
+  },
+
+  async harvestReferenceRepo(payload: HarvestReferencePayload): Promise<ArchitectureProfile> {
+    if (isMockMode) {
+      const newProfile: ArchitectureProfile = {
+        profile_id: payload.profile_id || `arch-${payload.profile_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        name: payload.profile_name,
+        target_runtime: 'Java 21 / Spring Boot 3.5.0',
+        created_at: new Date().toISOString(),
+        base_package_pattern: 'com.enterprise.{domain}.v2',
+        layering_pattern: 'CONTROLLER_SERVICE_REPOSITORY',
+        build_file_template: MOCK_PROFILES[0].build_file_template,
+        required_dependencies: MOCK_PROFILES[0].required_dependencies,
+        exemplars: MOCK_PROFILES[0].exemplars,
+        conformance_rules: MOCK_PROFILES[0].conformance_rules,
+        sha256_hash: '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
+      };
+      MOCK_PROFILES.unshift(newProfile);
+      activeProfileIdInMemory = newProfile.profile_id;
+      return newProfile;
+    }
+
+    let res;
+    if (payload.file) {
+      const formData = new FormData();
+      formData.append('file', payload.file);
+      formData.append('profile_name', payload.profile_name);
+      if (payload.profile_id) formData.append('profile_id', payload.profile_id);
+      res = await api.post('/api/architecture/harvest-reference', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    } else {
+      res = await api.post('/api/architecture/harvest-reference', {
+        repo_path: payload.repo_path || 'samples/reference-spring-boot-service',
+        profile_name: payload.profile_name,
+        profile_id: payload.profile_id,
+      });
+    }
+    activeProfileIdInMemory = res.data.profile_id;
+    return res.data;
   },
 };

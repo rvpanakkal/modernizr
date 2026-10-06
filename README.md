@@ -401,7 +401,7 @@ python -m pipeline_core.integrations.webhook_listener --auto-synthesize
 
 ## 9. Automated Test Suite
 
-The pipeline includes a comprehensive 73-test verification suite covering LST extraction, GraphRAG Cypher retrieval, 3-pass cognitive agents, pluggable issue trackers, webhook anti-tamper logic, target code synthesis, and the FastAPI control plane:
+The pipeline includes a comprehensive 84-test verification suite covering LST extraction, GraphRAG Cypher retrieval, 3-pass cognitive agents, pluggable issue trackers, webhook anti-tamper logic, target code synthesis, 4-layer target architecture harvesting, Step 5.5 ArchUnit conformance gating, and the FastAPI control plane:
 
 ```powershell
 $env:PYTHONPATH="modules/pipeline-core"
@@ -410,8 +410,14 @@ python -m pytest modules/pipeline-core/tests/ -v
 
 Expected output:
 ```text
-============================= 73 passed in 8.94s ==============================
+============================= 84 passed in 8.40s ==============================
 ```
+
+To run the dedicated Architecture Profile Harvesting demonstration and tests:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test_architecture_harvesting.ps1
+```
+*(Or on Linux/macOS: `./scripts/test_architecture_harvesting.sh`)*
 
 ---
 
@@ -432,18 +438,26 @@ modernization/
 │   │   ├── pom.xml
 │   │   └── src/main/java/          # ExtractorCli, LegacyMetadataExtractor, ClassRecord
 │   ├── pipeline-core/              # Python 3.11+ Core Orchestration & API Plane
-│   │   ├── api/                    # FastAPI Server (routers: source, graph, hitl, synthesis)
+│   │   ├── api/                    # FastAPI Server (routers: source, graph, hitl, synthesis, architecture)
+│   │   │   └── routers/architecture.py # /api/architecture/harvest-reference, /profiles, /select-active
 │   │   ├── pipeline_core/
 │   │   │   ├── agents/             # Decompiler, BusinessAbstractor, SpecFormatter, Synthesizer
+│   │   │   ├── architecture/       # 4-Layer Harvester, ArchUnit Templates, Profile Registry
+│   │   │   │   ├── provider_base.py          # TargetArchitectureProvider ABC
+│   │   │   │   ├── reference_repo_provider.py # 4-layer reference microservice inspector
+│   │   │   │   ├── archunit_templates.py      # Standard ArchUnit rules & generator
+│   │   │   │   └── registry.py               # Persistent profile storage & active pointer
 │   │   │   ├── graph/              # Neo4j batch ingestion & Cypher GraphRAG queries
 │   │   │   ├── integrations/       # Webhook listener & trackers (Jira, GitHub, Local)
-│   │   │   ├── schemas/            # Pydantic v2 data contracts (handoff, spec, webhook)
-│   │   │   └── workflows/          # CognitiveRunner, TargetSynthesisRunner
-│   │   └── tests/                  # Pytest test suite (73 tests)
+│   │   │   ├── schemas/            # Pydantic v2 data contracts (handoff, spec, webhook, architecture)
+│   │   │   └── workflows/          # CognitiveRunner, TargetSynthesisRunner (Step 5.5 ArchUnit Gate)
+│   │   └── tests/                  # Pytest test suite (84 tests)
 │   └── target-generators/          # Code generation templates (Spring Boot 3.5, Angular 18)
 ├── samples/
-│   └── legacy-banking-monolith/    # Sample Java EE 6 / JSF banking application
+│   ├── legacy-banking-monolith/    # Sample Java EE 6 / JSF banking application
+│   └── reference-spring-boot-service/ # Production reference service (Spring Boot 3.5, Java 21, ArchUnit)
 ├── scripts/
+│   ├── test_architecture_harvesting.ps1/.sh # Demo & test runner for Architecture Harvester
 │   ├── run_mock_mode.ps1/.sh       # Wrapper for root run_mock_mode.ps1
 │   ├── run_modernization_cockpit.ps1/.sh  # Launcher for Cockpit UI + FastAPI backend
 │   ├── run_full_pipeline.ps1/.sh          # End-to-end headless pipeline orchestrator

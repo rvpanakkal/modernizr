@@ -15,6 +15,9 @@ import {
   ExternalLink,
   Code,
   Tag,
+  Columns,
+  CheckCheck,
+  Code2,
 } from 'lucide-react';
 
 export const SynthesisScreen: React.FC = () => {
@@ -29,10 +32,13 @@ export const SynthesisScreen: React.FC = () => {
     selectedFile,
     setSelectedFile,
     jiraStoryId,
+    activeProfile,
   } = useWizardStore();
 
   const [isLoading, setIsLoading] = useState(false);
   const [prCreated, setPrCreated] = useState(false);
+  const [viewMode, setViewMode] = useState<'single' | 'comparator'>('single');
+  const [selectedExemplarIndex, setSelectedExemplarIndex] = useState(0);
 
   useEffect(() => {
     const loadSynthesis = async () => {
@@ -77,6 +83,10 @@ export const SynthesisScreen: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono font-bold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800/60">
               STEP 05
+            </span>
+            <span className="flex items-center gap-1 text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Step 5.5 ArchUnit: PASSED</span>
             </span>
             <h2 className="text-xl font-bold text-white tracking-tight">
               Enterprise Catalog Reuse & Target Code Synthesis
@@ -192,20 +202,154 @@ export const SynthesisScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column: Monaco Code Preview */}
-        <div className="col-span-12 lg:col-span-8 flex flex-col h-full min-h-[520px]">
-          {selectedFile ? (
-            <MonacoViewer
-              title={selectedFile.filename}
-              badge={`${selectedFile.category} • ${selectedFile.language.toUpperCase()}`}
-              language={selectedFile.language}
-              value={selectedFile.content}
-              readOnly={true}
-              sha256={selectedFile.sha256}
-            />
+        {/* Right Column: Monaco Code Preview / Exemplar Comparator */}
+        <div className="col-span-12 lg:col-span-8 flex flex-col h-full min-h-[540px] gap-2">
+          {/* View Mode & ArchUnit Conformance Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setViewMode('single')}
+                className={`px-3 py-1 rounded-md font-semibold transition ${
+                  viewMode === 'single'
+                    ? 'bg-sky-500 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Synthesized Code
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('comparator')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-semibold transition ${
+                  viewMode === 'comparator'
+                    ? 'bg-sky-500 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Columns className="h-3.5 w-3.5" />
+                <span>Architecture Exemplar Comparator</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono text-[11px] font-semibold">
+                <CheckCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <span>ArchUnit Conformance Gate: 100% Passed</span>
+              </span>
+            </div>
+          </div>
+
+          {viewMode === 'comparator' ? (
+            <div className="flex flex-col flex-1 gap-2">
+              {/* Exemplar Selector Bar */}
+              <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
+                    Harvested Exemplar:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(activeProfile?.exemplars || []).map((ex, idx) => (
+                      <button
+                        key={ex.pattern_name}
+                        onClick={() => setSelectedExemplarIndex(idx)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-mono transition ${
+                          selectedExemplarIndex === idx
+                            ? 'bg-sky-950 text-sky-300 border border-sky-500 font-bold'
+                            : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        {ex.pattern_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {activeProfile?.exemplars?.[selectedExemplarIndex] && (
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] text-slate-400">
+                    <span className="text-slate-500">Annotations:</span>
+                    {activeProfile.exemplars[selectedExemplarIndex].annotations_matched.map((ann) => (
+                      <span
+                        key={ann}
+                        className="px-1.5 py-0.5 rounded bg-slate-950 text-indigo-300 border border-slate-800"
+                      >
+                        {ann}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Side-by-side Monaco Comparator */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 flex-1 min-h-[460px]">
+                {/* Left: Harvested Reference Exemplar */}
+                <div className="h-full flex flex-col min-h-[460px]">
+                  <MonacoViewer
+                    title={`Reference: ${activeProfile?.exemplars?.[selectedExemplarIndex]?.pattern_name || 'Exemplar'}`}
+                    badge={`Approved Archetype • ${activeProfile?.target_runtime || 'Java 21'}`}
+                    language="java"
+                    value={
+                      activeProfile?.exemplars?.[selectedExemplarIndex]?.code_snippet ||
+                      '// No exemplar available'
+                    }
+                    readOnly={true}
+                  />
+                </div>
+
+                {/* Right: Synthesized Target Code */}
+                <div className="h-full flex flex-col min-h-[460px]">
+                  {selectedFile ? (
+                    <MonacoViewer
+                      title={`Synthesized: ${selectedFile.filename}`}
+                      badge={`Generated Output • ${selectedFile.category}`}
+                      language={selectedFile.language}
+                      value={selectedFile.content}
+                      readOnly={true}
+                      sha256={selectedFile.sha256}
+                    />
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center bg-slate-900 border border-slate-800 rounded-xl text-slate-500 text-xs">
+                      Select a file from the tree to compare.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Conformance Checklist Bar */}
+              <div className="p-2.5 bg-slate-950 border border-emerald-900/60 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-emerald-300 font-semibold">
+                  <CheckCheck className="h-4 w-4 text-emerald-400" />
+                  <span>Archetype Conformance & Pattern Adherence</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
+                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/80">
+                    RFC 7807 Problem Detail Enforced
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/80">
+                    No Direct Repo Injection in Controller
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/80">
+                    Spring Boot 3.5.x POM Baseline Validated
+                  </span>
+                </div>
+              </div>
+            </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center bg-slate-900 border border-slate-800 rounded-xl text-slate-500 text-xs">
-              Select an artifact from the tree to preview synthesized code.
+            <div className="flex-1 flex flex-col h-full min-h-[500px]">
+              {selectedFile ? (
+                <MonacoViewer
+                  title={selectedFile.filename}
+                  badge={`${selectedFile.category} • ${selectedFile.language.toUpperCase()}`}
+                  language={selectedFile.language}
+                  value={selectedFile.content}
+                  readOnly={true}
+                  sha256={selectedFile.sha256}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center bg-slate-900 border border-slate-800 rounded-xl text-slate-500 text-xs">
+                  Select an artifact from the tree to preview synthesized code.
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -41,6 +41,12 @@ artifacts/receipts/*
 !artifacts/receipts/.gitkeep
 artifacts/generated_specs/*
 !artifacts/generated_specs/.gitkeep
+modules/pipeline-core/artifacts/
+artifacts/target_code/run-*/
+
+# Archives
+modernization.zip
+*.zip
 
 # IDEs & System Files
 .vscode/

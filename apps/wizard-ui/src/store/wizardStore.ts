@@ -1,4 +1,10 @@
 import { create } from 'zustand';
+import {
+  ArchitectureProfile,
+  HarvestReferencePayload,
+  ProfileSummary,
+} from '../types/architecture';
+import { apiClient } from '../services/api';
 
 export interface EntrypointItem {
   fqn: string;
@@ -176,6 +182,11 @@ interface WizardState {
   generatedFiles: GeneratedFile[];
   selectedFile: GeneratedFile | null;
 
+  // Target Architecture Profile Subsystem
+  architectureProfiles: ArchitectureProfile[];
+  activeProfile: ArchitectureProfile | null;
+  isLoadingProfile: boolean;
+
   // Actions
   setStep: (step: number) => void;
   setMonolithInfo: (info: any) => void;
@@ -197,6 +208,9 @@ interface WizardState {
   setTargetStack: (stack: string) => void;
   setGeneratedFiles: (files: GeneratedFile[]) => void;
   setSelectedFile: (file: GeneratedFile | null) => void;
+  fetchArchitectureProfiles: () => Promise<void>;
+  setActiveProfile: (profileId: string) => Promise<void>;
+  uploadReferenceMicroservice: (payload: HarvestReferencePayload) => Promise<ArchitectureProfile>;
   resetWizard: () => void;
 }
 
@@ -205,6 +219,11 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   maxCompletedStep: 1,
 
   monolithInfo: null,
+
+  // Architecture Profile State
+  architectureProfiles: [],
+  activeProfile: null,
+  isLoadingProfile: false,
 
   entrypoints: [],
   selectedEntrypoint: null,
@@ -401,6 +420,78 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   setSelectedFile: (file: GeneratedFile | null) => {
     set({ selectedFile: file });
+  },
+
+  fetchArchitectureProfiles: async () => {
+    set({ isLoadingProfile: true });
+    try {
+      const summaries = await apiClient.getArchitectureProfiles();
+      const fullProfiles: ArchitectureProfile[] = (
+        await Promise.all(
+          summaries.map(async (s) => {
+            try {
+              return await apiClient.getArchitectureProfile(s.profile_id);
+            } catch {
+              return null;
+            }
+          })
+        )
+      ).filter((p): p is ArchitectureProfile => p !== null);
+
+      const currentActive = get().activeProfile;
+      let activeToSet = currentActive;
+      if (!activeToSet && fullProfiles.length > 0) {
+        const activeSummary = summaries.find((s) => s.is_active) || summaries[0];
+        activeToSet =
+          fullProfiles.find((p) => p.profile_id === activeSummary.profile_id) || fullProfiles[0];
+      }
+
+      set({
+        architectureProfiles: fullProfiles,
+        activeProfile: activeToSet || null,
+        isLoadingProfile: false,
+      });
+    } catch (err) {
+      console.error('[wizardStore] fetchArchitectureProfiles error:', err);
+      set({ isLoadingProfile: false });
+    }
+  },
+
+  setActiveProfile: async (profileId: string) => {
+    set({ isLoadingProfile: true });
+    try {
+      await apiClient.selectActiveArchitectureProfile(profileId);
+      let profile = get().architectureProfiles.find((p) => p.profile_id === profileId);
+      if (!profile) {
+        profile = await apiClient.getArchitectureProfile(profileId);
+        set((state) => ({
+          architectureProfiles: [...state.architectureProfiles, profile!],
+        }));
+      }
+      set({ activeProfile: profile, isLoadingProfile: false });
+    } catch (err) {
+      console.error('[wizardStore] setActiveProfile error:', err);
+      set({ isLoadingProfile: false });
+    }
+  },
+
+  uploadReferenceMicroservice: async (payload: HarvestReferencePayload) => {
+    set({ isLoadingProfile: true });
+    try {
+      const newProfile = await apiClient.harvestReferenceRepo(payload);
+      set((state) => ({
+        architectureProfiles: [
+          newProfile,
+          ...state.architectureProfiles.filter((p) => p.profile_id !== newProfile.profile_id),
+        ],
+        activeProfile: newProfile,
+        isLoadingProfile: false,
+      }));
+      return newProfile;
+    } catch (err) {
+      set({ isLoadingProfile: false });
+      throw err;
+    }
   },
 
   resetWizard: () => {

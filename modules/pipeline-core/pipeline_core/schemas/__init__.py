@@ -9,6 +9,12 @@ from .spec import (
     GeneratedSpecification,
 )
 from .webhook import JiraTransitionEvent, ApprovalVerificationResult, NextAction
+from .architecture import (
+    LayeringPattern,
+    CodePatternExemplar,
+    ArchUnitRule,
+    ArchitectureProfile,
+)
 
 __all__ = [
     "StepHandoffReceipt",
@@ -26,4 +32,8 @@ __all__ = [
     "JiraTransitionEvent",
     "ApprovalVerificationResult",
     "NextAction",
+    "LayeringPattern",
+    "CodePatternExemplar",
+    "ArchUnitRule",
+    "ArchitectureProfile",
 ]

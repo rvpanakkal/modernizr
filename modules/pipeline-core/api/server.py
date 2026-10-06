@@ -28,7 +28,7 @@ import uvicorn
 
 from api.config import Settings, get_settings
 from api.dependencies import close_neo4j_driver, init_neo4j_driver
-from api.routers import graph, hitl, pipeline, source, synthesis
+from api.routers import architecture, graph, hitl, pipeline, source, synthesis
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,6 +88,7 @@ app.include_router(graph.router)
 app.include_router(pipeline.router)
 app.include_router(hitl.router)
 app.include_router(synthesis.router)
+app.include_router(architecture.router)
 
 
 @app.get("/", tags=["System"])

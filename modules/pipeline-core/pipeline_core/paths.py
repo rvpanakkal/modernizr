@@ -37,6 +37,10 @@ def issues_dir() -> Path:
     return artifacts_root() / "issues"
 
 
+def architecture_profiles_dir() -> Path:
+    return artifacts_root() / "architecture_profiles"
+
+
 def sha256_file(path: PathLike) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as fh:

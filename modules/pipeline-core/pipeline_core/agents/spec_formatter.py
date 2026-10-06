@@ -14,8 +14,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
+from pipeline_core.architecture.registry import get_architecture_registry
+from pipeline_core.schemas.architecture import ArchitectureProfile
 from pipeline_core.schemas.spec import (
     BddScenario,
     BusinessRule,
@@ -51,38 +54,49 @@ class SpecFormatterAgent:
         api_key: Optional[str] = None,
         model: str = "claude-3-7-sonnet-20250219",
         max_retries: int = 3,
+        architecture_profile: Optional[ArchitectureProfile] = None,
     ) -> None:
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.model = model
         self.max_retries = max_retries
+        self.architecture_profile = architecture_profile
 
     def format_specification(
         self,
         business_rules: List[BusinessRule],
         entry_context: Dict[str, Any],
+        architecture_profile: Optional[ArchitectureProfile] = None,
     ) -> GeneratedSpecification:
         """
         Synthesizes a GeneratedSpecification from business rules and entry context.
         Uses Anthropic API if ANTHROPIC_API_KEY is available and MOCK_LLM != 'true',
         otherwise uses deterministic synthesis.
         """
+        profile = architecture_profile or self.architecture_profile
+        if not profile:
+            try:
+                profile = get_architecture_registry().get_active_profile()
+            except Exception:
+                profile = None
+
         mock_mode = os.getenv("MOCK_LLM", "false").lower() in ("true", "1", "yes")
         if not self.api_key or mock_mode:
             log.info("[SpecFormatterAgent] Using deterministic synthesis mode (MOCK_LLM=%s)", mock_mode)
-            return self._synthesize_deterministic(business_rules, entry_context)
+            return self._synthesize_deterministic(business_rules, entry_context, profile)
 
-        return self._call_anthropic(business_rules, entry_context)
+        return self._call_anthropic(business_rules, entry_context, profile)
 
     def _call_anthropic(
         self,
         business_rules: List[BusinessRule],
         entry_context: Dict[str, Any],
+        profile: Optional[ArchitectureProfile] = None,
     ) -> GeneratedSpecification:
         try:
             import anthropic
         except ImportError:
             log.warning("[SpecFormatterAgent] anthropic package not installed, falling back to deterministic synthesis.")
-            return self._synthesize_deterministic(business_rules, entry_context)
+            return self._synthesize_deterministic(business_rules, entry_context, profile)
 
         client = anthropic.Anthropic(api_key=self.api_key)
         tool_schema = {
@@ -96,6 +110,13 @@ class SpecFormatterAgent:
             f"Business Rules:\n```json\n{json.dumps([r.model_dump() for r in business_rules], indent=2)}\n```\n\n"
             f"Entry Context:\n```json\n{json.dumps(entry_context, indent=2, default=str)}\n```"
         )
+        if profile:
+            user_content += (
+                f"\n\nActive Architecture Profile Guidance:\n"
+                f"- Profile: {profile.name} ({profile.profile_id})\n"
+                f"- Base Package: {profile.base_package_pattern}\n"
+                f"- Layering: {profile.layering_pattern.value}\n"
+            )
 
         attempts = 0
         last_error = None
@@ -122,12 +143,13 @@ class SpecFormatterAgent:
                 last_error = e
 
         log.error("[SpecFormatterAgent] Failed after %d attempts, using deterministic synthesis. Error: %s", self.max_retries, last_error)
-        return self._synthesize_deterministic(business_rules, entry_context)
+        return self._synthesize_deterministic(business_rules, entry_context, profile)
 
     def _synthesize_deterministic(
         self,
         business_rules: List[BusinessRule],
         entry_context: Dict[str, Any],
+        profile: Optional[ArchitectureProfile] = None,
     ) -> GeneratedSpecification:
         """
         Deterministic, rule-based synthesis matching banking domain specifications.
@@ -228,6 +250,18 @@ class SpecFormatterAgent:
             "status": "String - Settlement status (PENDING, SETTLED, REJECTED)",
             "dailyLimitCeiling": "BigDecimal - Daily account transfer threshold ($50,000.00)",
         }
+
+        if profile:
+            pkg_convention = profile.base_package_pattern.replace("{domain}", "transfers")
+            data_contract_fields["packageConvention"] = f"String - Package namespace conforms to {pkg_convention}"
+            for ex in profile.exemplars:
+                if ex.pattern_name == "RestController":
+                    # Check for path prefix in RestController snippet
+                    match = re.search(r'@RequestMapping\("([^"]+)"\)', ex.code_snippet)
+                    if match:
+                        data_contract_fields["apiEndpointConvention"] = f"REST Resource Prefix: {match.group(1)}"
+                if "ProblemDetail" in ex.code_snippet:
+                    data_contract_fields["errorDetailStandard"] = "RFC 7807 ProblemDetail envelope (type, title, status, detail, instance)"
 
         return GeneratedSpecification(
             feature_name="Fund Transfer & Settlement Management",

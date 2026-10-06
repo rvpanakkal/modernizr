@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from pipeline_core.integrations.catalog_client import EnterpriseCatalogClient
 from pipeline_core.paths import sha256_file, target_code_dir
+from pipeline_core.schemas.architecture import ArchitectureProfile, LayeringPattern
 from pipeline_core.schemas.handoff import (
     ArtifactPointer,
     ArtifactType,
@@ -61,25 +62,40 @@ class TargetSynthesizerAgent:
         self,
         spec: GeneratedSpecification,
         output_root: Optional[Path] = None,
+        architecture_profile: Optional[ArchitectureProfile] = None,
     ) -> Dict[str, Any]:
         """
-        Synthesizes target assets for an approved specification.
+        Synthesizes target assets for an approved specification governed by the ArchitectureProfile.
 
         Args:
             spec: Approved GeneratedSpecification.
             output_root: Root directory for target code output (defaults to artifacts/target_code/).
+            architecture_profile: Optional ArchitectureProfile overriding active registry profile.
 
         Returns:
             Dict containing:
                 catalog_reuse: List of matching enterprise catalog services.
                 generated_files: Dict mapping relative paths to absolute Paths on disk.
                 artifact_pointers: List[ArtifactPointer] with SHA-256 digests.
+                architecture_profile: Active ArchitectureProfile used.
         """
         target_root = output_root or target_code_dir()
         target_root.mkdir(parents=True, exist_ok=True)
         jira_id = spec.jira_story_id or "MOD-101"
 
-        log.info("[TargetSynthesizer] Starting Step 5 Target Synthesis for Jira Story: %s", jira_id)
+        profile = architecture_profile
+        if not profile:
+            try:
+                from pipeline_core.architecture.registry import get_architecture_registry
+                profile = get_architecture_registry().get_active_profile()
+            except Exception:
+                profile = None
+
+        log.info(
+            "[TargetSynthesizer] Starting Step 5 Target Synthesis for Jira Story: %s (Profile: %s)",
+            jira_id,
+            profile.profile_id if profile else "NONE",
+        )
 
         # ── 1. Interrogate Enterprise Service Catalog ────────────────────────
         log.info("[TargetSynthesizer] Interrogating Enterprise Service Catalog for domain: '%s'...", spec.domain)
@@ -88,6 +104,30 @@ class TargetSynthesizerAgent:
         log.info("[TargetSynthesizer] Catalog query returned %d reusable services.", len(reusable_services))
 
         generated_files: Dict[str, Path] = {}
+
+        # ── 1b. Deterministic Build Scaffolding (pom.xml from Profile BOM) ───
+        spring_base = target_root / "spring_boot" / "src" / "main" / "java" / "com" / "enterprise" / "modernization"
+        spring_base.mkdir(parents=True, exist_ok=True)
+
+        if profile and profile.build_file_template:
+            pom_path = target_root / "spring_boot" / "pom.xml"
+            rendered_pom = profile.build_file_template
+            rendered_pom = rendered_pom.replace("{{GROUP_ID}}", "com.enterprise.modernization")
+            clean_domain = spec.domain.lower().replace(" ", "-").replace("/", "-")[:20].strip("-")
+            rendered_pom = rendered_pom.replace("{{ARTIFACT_ID}}", f"modernized-{clean_domain}")
+            rendered_pom = rendered_pom.replace("{{PROJECT_NAME}}", f"Modernized {spec.domain} Service")
+            pom_path.parent.mkdir(parents=True, exist_ok=True)
+            pom_path.write_text(rendered_pom, encoding="utf-8")
+            generated_files["spring_boot_pom"] = pom_path
+            log.info("[TargetSynthesizer] Scaffolding pom.xml from profile: %s", profile.profile_id)
+
+        # ── 1c. Layering Topology Folder Scaffolding ─────────────────────────
+        if profile and profile.layering_pattern == LayeringPattern.HEXAGONAL:
+            for layer in ("ports", "adapters", "domain", "application"):
+                (spring_base / layer).mkdir(parents=True, exist_ok=True)
+        else:
+            for layer in ("web", "service", "repository", "dto", "exception", "config"):
+                (spring_base / layer).mkdir(parents=True, exist_ok=True)
 
         # ── 2. Synthesize OpenAPI 3.0 Contract ──────────────────────────────
         openapi_path = target_root / "contracts" / f"openapi_{jira_id.lower()}.yaml"
@@ -99,9 +139,6 @@ class TargetSynthesizerAgent:
         log.info("[TargetSynthesizer] Generated OpenAPI 3.0 Contract: %s", openapi_path)
 
         # ── 3. Synthesize Java 21 / Spring Boot 3.5.x Backend ───────────────
-        spring_base = target_root / "spring_boot" / "src" / "main" / "java" / "com" / "enterprise" / "modernization"
-        spring_base.mkdir(parents=True, exist_ok=True)
-
         # DTOs
         dto_dir = spring_base / "dto"
         dto_dir.mkdir(parents=True, exist_ok=True)
@@ -130,6 +167,17 @@ class TargetSynthesizerAgent:
         with open(ctrl_path, "w", encoding="utf-8") as f:
             f.write(self._render_transfer_controller(spec, jira_id))
         generated_files["spring_controller"] = ctrl_path
+
+        # Global Exception Handler from Exemplar (if available)
+        if profile:
+            handler_exemplar = next((ex for ex in profile.exemplars if ex.pattern_name == "GlobalExceptionHandler"), None)
+            if handler_exemplar:
+                exc_dir = spring_base / "web"
+                exc_dir.mkdir(parents=True, exist_ok=True)
+                exc_path = exc_dir / "GlobalExceptionHandler.java"
+                exc_path.write_text(handler_exemplar.code_snippet, encoding="utf-8")
+                generated_files["global_exception_handler"] = exc_path
+
         log.info("[TargetSynthesizer] Generated Java 21 / Spring Boot 3.5.x components in: %s", spring_base)
 
         # ── 4. Synthesize Angular Standalone Components with Signals ─────────
@@ -156,18 +204,36 @@ class TargetSynthesizerAgent:
         generated_files["junit_tests"] = test_path
         log.info("[TargetSynthesizer] Generated JUnit 5 BDD Acceptance Tests in: %s", test_path)
 
+        # ── 5b. Step 5.5 ArchUnit Conformance Test Suite ────────────────────
+        if profile and profile.conformance_rules:
+            from pipeline_core.architecture.archunit_templates import render_archunit_test_class
+            arch_test_dir = target_root / "spring_boot" / "src" / "test" / "java" / "com" / "enterprise" / "modernization"
+            arch_test_dir.mkdir(parents=True, exist_ok=True)
+            arch_test_path = arch_test_dir / "ArchitectureConformanceTest.java"
+            arch_test_content = render_archunit_test_class(
+                profile=profile,
+                package_name="com.enterprise.modernization",
+                scan_package="com.enterprise.modernization",
+            )
+            arch_test_path.write_text(arch_test_content, encoding="utf-8")
+            generated_files["archunit_conformance_test"] = arch_test_path
+            log.info("[TargetSynthesizer] Generated ArchUnit Conformance Test in: %s", arch_test_path)
+
         # ── 6. Build Artifact Pointers with SHA-256 Checksums ────────────────
         artifact_pointers: List[ArtifactPointer] = []
 
         type_mapping = {
             "openapi_spec": (ArtifactType.OPENAPI_SPEC, "application/yaml"),
+            "spring_boot_pom": (ArtifactType.SPRING_BOOT_CODE, "application/xml"),
             "spring_request_dto": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
             "spring_response_dto": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
             "spring_service": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
             "spring_controller": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
+            "global_exception_handler": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
             "angular_component_ts": (ArtifactType.ANGULAR_CODE, "application/typescript"),
             "angular_component_html": (ArtifactType.ANGULAR_CODE, "text/html"),
             "junit_tests": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
+            "archunit_conformance_test": (ArtifactType.SPRING_BOOT_CODE, "text/x-java-source"),
         }
 
         for key, path in generated_files.items():

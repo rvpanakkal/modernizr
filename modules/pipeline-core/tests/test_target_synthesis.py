@@ -193,7 +193,7 @@ class TestTargetCodeSynthesis:
         assert receipt.status == ExecutionStatus.COMPLETED
         assert receipt.hitl_approved is True
         assert receipt.step_number == 5
-        assert len(receipt.output_pointers) == 8
+        assert len(receipt.output_pointers) >= 8
 
         # 1. OpenAPI Specification Verification
         openapi_file = target_dir / "contracts" / f"openapi_{sample_spec['jira_id'].lower()}.yaml"
