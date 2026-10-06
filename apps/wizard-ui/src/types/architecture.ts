@@ -57,3 +57,34 @@ export interface HarvestReferencePayload {
   profile_name: string;
   profile_id?: string;
 }
+
+export interface ExtractedClassItem {
+  fqn: string;
+  simple_name: string;
+  kind: string;
+  role: string;
+  annotations: string[];
+  methods_count: number;
+  fields_count: number;
+  invocations_count: number;
+  injected_dependencies: string[];
+}
+
+export interface SourceIngestResult {
+  status: string;
+  monolith_id: string;
+  jdk_version: string;
+  framework_profile: string;
+  classpath_strategy: string;
+  classes_count: number;
+  methods_count: number;
+  injected_fields_count: number;
+  invocations_count: number;
+  endpoints_count: number;
+  cics_gateways_count: number;
+  sha256_digest: string;
+  extracted_at: string;
+  execution_time_ms?: number;
+  message?: string;
+  classes?: ExtractedClassItem[];
+}

@@ -415,11 +415,17 @@ public class LegacyMetadataExtractor extends Recipe {
             return fallback != null ? fallback : "Object";
         }
 
-        /** Returns FQN of class declaration, falling back to simple name if type is unresolved. */
+        /** Returns FQN of class declaration, falling back to package declaration + simple name if type is unresolved. */
         private String resolveClassFqn(J.ClassDeclaration cd) {
             JavaType.FullyQualified fq = cd.getType();
-            if (fq != null) {
+            if (fq != null && fq.getFullyQualifiedName() != null && !fq.getFullyQualifiedName().isEmpty()) {
                 return fq.getFullyQualifiedName();
+            }
+            // Fall back to package declaration + simple name
+            J.CompilationUnit cu = getCursor().firstEnclosing(J.CompilationUnit.class);
+            if (cu != null && cu.getPackageDeclaration() != null) {
+                String pkg = cu.getPackageDeclaration().getExpression().printTrimmed(getCursor());
+                return pkg + "." + cd.getSimpleName();
             }
             return cd.getSimpleName();
         }

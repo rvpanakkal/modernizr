@@ -1,6 +1,6 @@
 {
-  "active_profile_id": "arch-api-harvest-test",
-  "profile_name": "API Harvested Profile",
-  "sha256_hash": "624134aaaf17671224eab3046bc97b6d5269cc9e88d4d4a3ec80735a8c94d6da",
-  "updated_at": "2026-10-06T03:41:35.836829+00:00"
+  "active_profile_id": "arch-payments-v2",
+  "profile_name": "Enterprise Reference Payments & Accounts Microservice",
+  "sha256_hash": "7eb5cf7cb39ef7925b8fe129f58a197a5e16acce8005fcf3af7fca761b273af2",
+  "updated_at": "2026-10-06T03:02:26.987838Z"
 }
