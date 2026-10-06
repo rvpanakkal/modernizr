@@ -15,6 +15,19 @@ from .architecture import (
     ArchUnitRule,
     ArchitectureProfile,
 )
+from .graph import (
+    GraphNode,
+    GraphEdge,
+    GraphMetadata,
+    LSTGraphData,
+    EntryPoint,
+    EntrypointItem,
+    SliceRequest,
+    SliceResponse,
+    IngestionStats,
+    SourceIngestionResult,
+    DiagnosticsResponse,
+)
 
 __all__ = [
     "StepHandoffReceipt",
@@ -36,4 +49,15 @@ __all__ = [
     "CodePatternExemplar",
     "ArchUnitRule",
     "ArchitectureProfile",
+    "GraphNode",
+    "GraphEdge",
+    "GraphMetadata",
+    "LSTGraphData",
+    "EntryPoint",
+    "EntrypointItem",
+    "SliceRequest",
+    "SliceResponse",
+    "IngestionStats",
+    "SourceIngestionResult",
+    "DiagnosticsResponse",
 ]

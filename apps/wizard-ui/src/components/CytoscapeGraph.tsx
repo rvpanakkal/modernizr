@@ -208,16 +208,20 @@ export const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
           <span className="text-slate-300">Presentation</span>
         </div>
         <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-[#06b6d4]" />
+          <span className="text-slate-300">API</span>
+        </div>
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-[#10b981]" />
-          <span className="text-slate-300">Domain Service</span>
+          <span className="text-slate-300">Service</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-[#8b5cf6]" />
-          <span className="text-slate-300">Gateway / CICS</span>
+          <span className="text-slate-300">Integration</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-[#f59e0b]" />
-          <span className="text-slate-300">Data Access</span>
+          <span className="text-slate-300">Data</span>
         </div>
       </div>
     </div>

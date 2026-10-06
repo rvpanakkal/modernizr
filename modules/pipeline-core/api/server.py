@@ -99,7 +99,7 @@ def root_info() -> Dict[str, Any]:
         "status": "OPERATIONAL",
         "pipeline_stages": [
             "Step 1: Ingestion & LST Parsing",
-            "Step 2: Neo4j Graph Storage & GraphRAG Slicing",
+            "Step 2: NetworkX In-Memory Graph & GraphRAG Slicing",
             "Step 3: Multi-Pass Cognitive Extraction Chain",
             "Step 4: HITL Review & Jira Gate Checkpoint",
             "Step 5: Catalog Reuse & Target Enterprise Synthesis",
