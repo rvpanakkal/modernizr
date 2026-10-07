@@ -181,6 +181,7 @@ interface WizardState {
   fetchSliceTopology: (entryFqn?: string, depth?: number) => Promise<void>;
   proceedToExtraction: () => Promise<void>;
   extractAndProceed: () => Promise<void>;
+  proceedToHitlReview: () => void;
   startExtraction: (entryFqn?: string, maxDepth?: number) => Promise<void>;
   startBatchExtraction: () => Promise<void>;
   toggleEntryPointSelection: (fqn: string) => void;
@@ -735,6 +736,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   extractAndProceed: async (): Promise<void> => {
     return get().startExtraction();
+  },
+
+  proceedToHitlReview: () => {
+    set({
+      currentStep: 4,
+      maxCompletedStep: Math.max(get().maxCompletedStep, 3),
+    });
   },
 
   setStep: (step: number) => {

@@ -8,8 +8,6 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  Pause,
-  Play,
   Copy,
   Check,
   Trash2,
@@ -41,14 +39,12 @@ export const TelemetryScreen: React.FC = () => {
     setInspectedRunId,
     clearTerminalLogs,
     setStep,
+    proceedToHitlReview,
   } = useWizardStore();
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [isAutoAdvancePaused, setIsAutoAdvancePaused] = useState<boolean>(false);
-  const countdownTimerRef = useRef<any>(null);
 
   // Auto-initiate extraction if not already running or completed and not in batch mode
   useEffect(() => {
@@ -64,48 +60,11 @@ export const TelemetryScreen: React.FC = () => {
     }
   }, [terminalLogs, autoScroll]);
 
-  // Handle 2-second countdown auto-advance on extraction complete
-  useEffect(() => {
-    if (isExtractionComplete && countdown === null && !isAutoAdvancePaused) {
-      setCountdown(2);
-    }
-  }, [isExtractionComplete, countdown, isAutoAdvancePaused]);
-
-  useEffect(() => {
-    if (countdown === null || isAutoAdvancePaused) return;
-
-    if (countdown === 0) {
-      setStep(4);
-      return;
-    }
-
-    countdownTimerRef.current = setTimeout(() => {
-      setCountdown((prev) => (prev !== null && prev > 0 ? prev - 1 : 0));
-    }, 1000);
-
-    return () => {
-      if (countdownTimerRef.current) {
-        clearTimeout(countdownTimerRef.current);
-      }
-    };
-  }, [countdown, isAutoAdvancePaused, setStep]);
-
   const handleCopyLogs = () => {
     const text = terminalLogs.join('');
     navigator.clipboard.writeText(text);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
-  };
-
-  const handleToggleAutoAdvance = () => {
-    setIsAutoAdvancePaused((prev) => !prev);
-  };
-
-  const handleProceedImmediately = () => {
-    if (countdownTimerRef.current) {
-      clearTimeout(countdownTimerRef.current);
-    }
-    setStep(4);
   };
 
   const maxTokens = 6000;
@@ -143,6 +102,16 @@ export const TelemetryScreen: React.FC = () => {
     }
     return 0;
   }, [currentPass, passStates]);
+
+  const isBatchComplete =
+    activeBatch &&
+    (activeBatch.status === 'COMPLETED' || activeBatch.status === 'PARTIAL_FAILURE');
+
+  const isComplete = activeBatch
+    ? Boolean(isBatchComplete)
+    : Boolean(isExtractionComplete || currentSpec);
+
+  const canProceed = !isExtracting && isComplete && (activeBatch ? true : Boolean(currentSpec));
 
   const passes = [
     {
@@ -527,79 +496,44 @@ export const TelemetryScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Auto-Advance Banner & Proceed CTA */}
+        {/* Manual Action & Step Handoff Controls */}
         <div className="flex items-center gap-3">
-          {activeBatch ? (
-            activeBatch.status === 'COMPLETED' ||
-            activeBatch.status === 'PARTIAL_FAILURE' ||
-            isExtractionComplete ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 text-xs font-mono flex items-center gap-2">
-                  <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>
-                    All Specs Ready ({activeBatch.completed_slices}/{activeBatch.total_slices})
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => setStep(4)}
-                  className="flex items-center gap-2 py-2 px-4 rounded-lg font-bold text-xs text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition cursor-pointer"
-                >
-                  <span>Proceed to HITL Review (All Specs Ready)</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-xs font-mono text-slate-400 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
+          {canProceed ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 text-xs font-mono">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 <span>
-                  Batch Running: {activeBatch.completed_slices} / {activeBatch.total_slices} slices completed (3-worker pool)...
+                  ✔ Extraction Complete — Ready for Review
+                  {activeBatch ? ` (${activeBatch.completed_slices}/${activeBatch.total_slices} Slices)` : ''}
                 </span>
               </div>
-            )
-          ) : isExtractionComplete ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 text-xs font-mono flex items-center gap-2">
-                <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                {isAutoAdvancePaused ? (
-                  <span>Auto-advance paused</span>
-                ) : (
-                  <span>
-                    Auto-advancing to HITL Review in{' '}
-                    <strong className="text-white text-sm">{countdown ?? 2}s</strong>...
-                  </span>
-                )}
-              </div>
 
               <button
-                onClick={handleToggleAutoAdvance}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs font-semibold transition"
+                onClick={proceedToHitlReview}
+                disabled={isExtracting || (!currentSpec && !activeBatch)}
+                className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-medium text-xs rounded transition flex items-center gap-2 shadow-lg cursor-pointer disabled:cursor-not-allowed"
               >
-                {isAutoAdvancePaused ? (
-                  <>
-                    <Play className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Resume</span>
-                  </>
-                ) : (
-                  <>
-                    <Pause className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Pause Auto-Advance</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={handleProceedImmediately}
-                className="flex items-center gap-2 py-2 px-4 rounded-lg font-bold text-xs text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition cursor-pointer"
-              >
-                <span>Proceed Immediately</span>
-                <ArrowRight className="h-4 w-4" />
+                Proceed to HITL Review <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-xs font-mono text-slate-400 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
-              <span>Status: Processing multi-pass LLM chain... (Auto-advances to HITL)</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-xs font-mono text-slate-400 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
+                <span>
+                  {activeBatch
+                    ? `Batch Running: ${activeBatch.completed_slices} / ${activeBatch.total_slices} slices completed (3-worker pool)...`
+                    : 'Extraction In Progress...'}
+                </span>
+              </div>
+
+              <button
+                onClick={proceedToHitlReview}
+                disabled={true}
+                className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-medium text-xs rounded transition flex items-center gap-2 shadow-lg cursor-not-allowed"
+              >
+                Proceed to HITL Review <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
           )}
         </div>
