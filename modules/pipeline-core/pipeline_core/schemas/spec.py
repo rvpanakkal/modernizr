@@ -29,6 +29,12 @@ def _strip_gherkin_keyword(step: str) -> str:
     return _GHERKIN_KEYWORD.sub("", step.strip())
 
 
+class TraceabilityAnchor(BaseModel):
+    legacy_file: str = ""
+    start_line: int = 1
+    end_line: int = 1
+
+
 # =============================================================================
 # Pass 1 — Technical Decompiler output
 # =============================================================================

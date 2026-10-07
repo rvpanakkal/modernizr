@@ -104,15 +104,17 @@ def get_specification_for_review(
 
     # Try loading from disk if not in memory
     if not spec:
-        spec_file = specs_dir() / f"spec_{run_id}.json"
-        if spec_file.exists():
-            try:
-                with open(spec_file, "r", encoding="utf-8") as f:
-                    spec_data = json.load(f)
-                spec = GeneratedSpecification.model_validate(spec_data)
-                spec_sha256 = sha256_file(spec_file)
-            except Exception as exc:
-                log.warning("[HITL Router] Failed to load spec from disk: %s", exc)
+        for candidate_name in (f"{run_id}.json", f"spec_{run_id}.json"):
+            spec_file = specs_dir() / candidate_name
+            if spec_file.exists():
+                try:
+                    with open(spec_file, "r", encoding="utf-8") as f:
+                        spec_data = json.load(f)
+                    spec = GeneratedSpecification.model_validate(spec_data)
+                    spec_sha256 = sha256_file(spec_file)
+                    break
+                except Exception as exc:
+                    log.warning("[HITL Router] Failed to load spec from disk: %s", exc)
 
     # Fallback to simulated canonical spec
     if not spec:
@@ -207,6 +209,9 @@ def get_specification_for_review(
                 run_id=run_id,
             )
             spec_sha256 = hashlib.sha256(spec.model_dump_json().encode()).hexdigest()
+            specs_dir().mkdir(parents=True, exist_ok=True)
+            fallback_path = specs_dir() / f"spec_{run_id}.json"
+            fallback_path.write_text(spec.model_dump_json(indent=2), encoding="utf-8")
 
     return SpecReviewResponse(
         run_id=run_id,
@@ -234,6 +239,8 @@ def approve_spec(
     cached_run = runner.get_run(run_id)
 
     spec_file = specs_dir() / f"spec_{run_id}.json"
+    if not spec_file.exists():
+        spec_file = specs_dir() / f"{run_id}.json"
     actual_hash = sha256_file(spec_file) if spec_file.exists() else (cached_run.get("spec_sha256") if cached_run else "simulated-sha256")
 
     # If client passed hash, check integrity
@@ -315,11 +322,18 @@ def revise_spec(
 
     spec: Optional[GeneratedSpecification] = cached_run.get("spec") if cached_run else None
 
+    spec_file = None
     if not spec:
-        spec_file = specs_dir() / f"spec_{run_id}.json"
-        if spec_file.exists():
-            with open(spec_file, "r", encoding="utf-8") as f:
-                spec = GeneratedSpecification.model_validate(json.load(f))
+        for candidate_name in (f"spec_{run_id}.json", f"{run_id}.json"):
+            candidate = specs_dir() / candidate_name
+            if candidate.exists():
+                try:
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        spec = GeneratedSpecification.model_validate(json.load(f))
+                    spec_file = candidate
+                    break
+                except Exception:
+                    pass
 
     if not spec:
         raise HTTPException(
@@ -343,7 +357,7 @@ def revise_spec(
     spec.business_summary += f"\n\n[Revision Addendum]: {request.feedback}"
 
     # Re-save to disk
-    spec_path = specs_dir() / f"spec_{run_id}.json"
+    spec_path = spec_file if spec_file else (specs_dir() / f"spec_{run_id}.json")
     with open(spec_path, "w", encoding="utf-8") as f:
         f.write(spec.model_dump_json(indent=2))
 

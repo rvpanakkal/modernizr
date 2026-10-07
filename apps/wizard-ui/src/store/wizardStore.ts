@@ -11,9 +11,10 @@ import {
   GraphEdge,
   VerticalSliceResponse,
   SliceResponse,
-  LayerType,
 } from '../types/graph';
 import { apiClient } from '../services/api';
+import { GeneratedSpecification, PassState, PassStatus, TelemetryEvent } from '../types/telemetry';
+import { sseClient } from '../services/sseClient';
 
 export type EntrypointItem = EntryPoint;
 export type SliceData = VerticalSliceResponse;
@@ -129,6 +130,11 @@ interface WizardState {
 
   // Screen 3: Telemetry
   runId: string | null;
+  currentPass: 1 | 2 | 3 | null;
+  passStates: Record<1 | 2 | 3, { status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'; latencyMs: number; tokens: number }>;
+  terminalLogs: string[];
+  currentSpec: GeneratedSpecification | null;
+  isExtracting: boolean;
   sseConnected: boolean;
   telemetryLogs: TelemetryLog[];
   activePass: number;
@@ -171,6 +177,11 @@ interface WizardState {
   fetchSliceTopology: (entryFqn?: string, depth?: number) => Promise<void>;
   proceedToExtraction: () => Promise<void>;
   extractAndProceed: () => Promise<void>;
+  startExtraction: (entryFqn?: string, maxDepth?: number) => Promise<void>;
+  appendTerminalToken: (token: string) => void;
+  setPassCompleted: (passNumber: 1 | 2 | 3, stats: { latencyMs: number; tokens: number }) => void;
+  completeExtraction: (spec: GeneratedSpecification) => void;
+  clearTerminalLogs: () => void;
 
   setStep: (step: number) => void;
   setMonolithInfo: (info: any) => void;
@@ -223,6 +234,15 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   graphError: null,
 
   runId: null,
+  currentPass: null,
+  passStates: {
+    1: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+    2: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+    3: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+  },
+  terminalLogs: [],
+  currentSpec: null,
+  isExtracting: false,
   sseConnected: false,
   telemetryLogs: [],
   activePass: 1,
@@ -396,33 +416,172 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
   },
 
-  proceedToExtraction: async (): Promise<void> => {
+  startExtraction: async (entryFqn?: string, depth?: number): Promise<void> => {
     const entry = get().selectedEntryPoint;
+    const fqn = entryFqn || entry?.fqn || 'com.legacy.banking.web.TransferManagedBean';
+    const currentDepth = depth ?? get().sliceDepth ?? 5;
     const slice = get().sliceData;
-    if (!entry || !slice) return;
+    const slicePayload = slice?.raw_slice && Object.keys(slice.raw_slice).length > 0 ? slice.raw_slice : slice;
 
-    set({ isLoading: true });
+    set({
+      isLoading: true,
+      isExtracting: true,
+      currentPass: 1,
+      passStates: {
+        1: { status: 'RUNNING', latencyMs: 0, tokens: 0 },
+        2: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+        3: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+      },
+      terminalLogs: [],
+      currentStep: 3,
+      maxCompletedStep: Math.max(get().maxCompletedStep, 2),
+    });
     get().resetTelemetry();
+
     try {
-      const res = await apiClient.startPipelineRun(entry.fqn, slice.raw_slice, 'jira');
-      set({
-        runId: res.run_id,
-        currentStep: 3,
-        maxCompletedStep: Math.max(get().maxCompletedStep, 2),
-      });
+      const res = await apiClient.startPipelineRun(fqn, slicePayload, 'jira');
+      const runId = res.run_id;
+      set({ runId, isLoading: false });
+
+      // Connect SSE pipeline client with typed listeners
+      sseClient.connect(
+        runId,
+        (event: TelemetryEvent) => {
+          get().appendTelemetry(event);
+
+          if (event.type === 'PASS_STARTED' && event.pass_number) {
+            const pNum = event.pass_number as 1 | 2 | 3;
+            set((state) => ({
+              currentPass: pNum,
+              passStates: {
+                ...state.passStates,
+                [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
+              },
+            }));
+          } else if (event.type === 'TOKEN_CHUNK' && event.token) {
+            get().appendTerminalToken(event.token);
+            if (event.pass && event.cumulative_tokens) {
+              const pNum = event.pass as 1 | 2 | 3;
+              set((state) => ({
+                passStates: {
+                  ...state.passStates,
+                  [pNum]: { ...state.passStates[pNum], tokens: event.cumulative_tokens || state.passStates[pNum].tokens },
+                },
+              }));
+            }
+          } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
+            get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
+              latencyMs: event.latency_ms || 0,
+              tokens: event.tokens || 0,
+            });
+          } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
+            get().completeExtraction(event.spec);
+          }
+        },
+        (error) => {
+          console.warn('[SSE] Extraction stream warning:', error);
+        }
+      );
     } catch (err) {
-      console.warn('Failed to start pipeline run through API; advancing step for workflow continuity:', err);
-      set({
-        currentStep: 3,
-        maxCompletedStep: Math.max(get().maxCompletedStep, 2),
-      });
-    } finally {
+      console.warn('Failed to start pipeline run through API; falling back to simulator:', err);
       set({ isLoading: false });
+      const fallbackRunId = `run-${Math.random().toString(36).substring(2, 9)}`;
+      set({ runId: fallbackRunId });
+      sseClient.connect(
+        fallbackRunId,
+        (event: TelemetryEvent) => {
+          get().appendTelemetry(event);
+          if (event.type === 'PASS_STARTED' && event.pass_number) {
+            const pNum = event.pass_number as 1 | 2 | 3;
+            set((state) => ({
+              currentPass: pNum,
+              passStates: {
+                ...state.passStates,
+                [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
+              },
+            }));
+          } else if (event.type === 'TOKEN_CHUNK' && event.token) {
+            get().appendTerminalToken(event.token);
+          } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
+            get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
+              latencyMs: event.latency_ms || 0,
+              tokens: event.tokens || 0,
+            });
+          } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
+            get().completeExtraction(event.spec);
+          }
+        }
+      );
     }
   },
 
+  appendTerminalToken: (token: string) => {
+    set((state) => ({
+      terminalLogs: [...state.terminalLogs, token],
+    }));
+  },
+
+  setPassCompleted: (passNumber: 1 | 2 | 3, stats: { latencyMs: number; tokens: number }) => {
+    set((state) => ({
+      passStates: {
+        ...state.passStates,
+        [passNumber]: { status: 'COMPLETED', latencyMs: stats.latencyMs, tokens: stats.tokens },
+      },
+    }));
+  },
+
+  completeExtraction: (spec: GeneratedSpecification) => {
+    const rawSpec: any = spec;
+    const businessRules: BusinessRule[] = (spec.business_rules || []).map((r: any) => ({
+      rule_id: r.rule_id,
+      description: r.description || r.name,
+      rule_type: r.severity || r.rule_type || 'VALIDATION',
+      condition: r.condition || '',
+      action_or_outcome: r.action_or_outcome || '',
+      legacy_refs: r.legacy_refs || (r.traceability ? [`${r.traceability.legacy_file}:L${r.traceability.start_line}-L${r.traceability.end_line}`] : []),
+    }));
+
+    const scenarios: BddScenario[] = (spec.bdd_scenarios || (spec as any).scenarios || []).map((s: any) => ({
+      name: s.title || s.name || '',
+      given: s.given || (s.gherkin_text ? [s.gherkin_text] : []),
+      when: s.when || '',
+      then: s.then || [],
+      legacy_refs: s.legacy_refs || (s.traceability ? [`${s.traceability.legacy_file}:L${s.traceability.start_line}-L${s.traceability.end_line}`] : []),
+    }));
+
+    const adaptedSpec: GeneratedSpec = {
+      feature_name: spec.feature_name,
+      domain: spec.domain,
+      business_summary: spec.business_summary || '',
+      business_rules: businessRules,
+      scenarios: scenarios,
+      data_contract_fields: spec.data_contract_fields || {},
+      legacy_traceability: spec.legacy_traceability || {},
+      jira_story_id: spec.jira_story_id || 'MOD-101',
+      run_id: spec.run_id,
+    };
+
+    set({
+      currentSpec: spec,
+      specData: adaptedSpec,
+      specSha256: spec.sha256_hash,
+      legacySource: spec.legacy_source_snapshot || '',
+      isExtracting: false,
+      isExtractionComplete: true,
+      maxCompletedStep: Math.max(get().maxCompletedStep, 3),
+    });
+  },
+
+  clearTerminalLogs: () => {
+    set({ terminalLogs: [] });
+  },
+
+  proceedToExtraction: async (): Promise<void> => {
+    return get().startExtraction();
+  },
+
   extractAndProceed: async (): Promise<void> => {
-    return get().proceedToExtraction();
+    return get().startExtraction();
   },
 
   setStep: (step: number) => {
@@ -519,6 +678,15 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   resetTelemetry: () => {
     set({
+      currentPass: null,
+      passStates: {
+        1: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+        2: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+        3: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+      },
+      terminalLogs: [],
+      currentSpec: null,
+      isExtracting: false,
       telemetryLogs: [],
       activePass: 1,
       passStatus: { pass1: 'pending', pass2: 'pending', pass3: 'pending' },

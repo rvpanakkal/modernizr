@@ -201,8 +201,21 @@ export const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        if (cyRef.current) {
+          cyRef.current.resize();
+        }
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       cy.destroy();
       cyRef.current = null;
     };

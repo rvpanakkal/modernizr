@@ -25,11 +25,38 @@ class EventBus:
         self._history: Dict[str, deque[Dict[str, Any]]] = defaultdict(lambda: deque(maxlen=history_limit))
         self._lock = asyncio.Lock()
 
-    async def publish(self, run_id: str, event: Dict[str, Any]) -> None:
+    async def publish(
+        self,
+        run_id: str,
+        event_type_or_dict: Any,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
-        Publish an event dictionary to all active subscribers for the given run_id.
-        Also records the event into the historical ring buffer for late subscribers.
+        Publish an event to all active subscribers for the given run_id.
+        Supports both signatures:
+          - publish(run_id, event_type="TOKEN_CHUNK", data={"token": chunk})
+          - publish(run_id, event={"type": "TOKEN_CHUNK", ...})
         """
+        from datetime import datetime, timezone
+
+        if isinstance(event_type_or_dict, str):
+            event = {
+                "type": event_type_or_dict,
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                **(data or {}),
+            }
+        elif isinstance(event_type_or_dict, dict):
+            event = dict(event_type_or_dict)
+            if "run_id" not in event:
+                event["run_id"] = run_id
+            if "timestamp" not in event:
+                event["timestamp"] = datetime.now(timezone.utc).isoformat()
+            if data:
+                event.update(data)
+        else:
+            event = {"type": str(event_type_or_dict), "run_id": run_id, **(data or {})}
+
         async with self._lock:
             self._history[run_id].append(event)
             queues = list(self._subscribers.get(run_id, set()))
@@ -56,6 +83,8 @@ class EventBus:
             # First replay existing events so UI is in sync
             for past_evt in past_events:
                 yield past_evt
+                if past_evt.get("type") in ("EXTRACTION_COMPLETE", "PIPELINE_ERROR", "STREAM_CLOSED"):
+                    return
 
             # Now stream live events
             while True:
