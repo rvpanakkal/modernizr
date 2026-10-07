@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useWizardStore } from '../store/wizardStore';
-import { sseClient } from '../services/sseClient';
+import { subscribeToRunStream } from '../services/sseClient';
 import {
   Terminal,
   ArrowRight,
@@ -40,9 +40,18 @@ export const TelemetryScreen: React.FC = () => {
     clearTerminalLogs,
     setStep,
     proceedToHitlReview,
+    appendTerminalToken,
+    updatePassState,
+    handleExtractionComplete,
+    handleExtractionError,
+    setSseConnected,
   } = useWizardStore();
 
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const effectiveRunId = inspectedRunId || runId;
+  const sseSubRef = useRef<{ close: () => void } | null>(null);
+
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState<boolean>(false);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
@@ -53,12 +62,65 @@ export const TelemetryScreen: React.FC = () => {
     }
   }, [runId, isExtracting, isExtractionComplete, activeBatch, startExtraction]);
 
-  // Terminal auto-scrolling
+  // Fix 1: Clean SSE Subscription Management (Strictly dependent on effectiveRunId primitive)
   useEffect(() => {
-    if (autoScroll && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!effectiveRunId) return;
+
+    // Guard: if already completed and currentSpec matches this runId, avoid redundant connection
+    if (isExtractionComplete && currentSpec?.run_id === effectiveRunId) {
+      return;
     }
-  }, [terminalLogs, autoScroll]);
+
+    // Clean up any existing connection before opening a new one
+    if (sseSubRef.current) {
+      sseSubRef.current.close();
+      sseSubRef.current = null;
+    }
+
+    setSseConnected(true);
+
+    const sse = subscribeToRunStream(effectiveRunId, {
+      onToken: (token) => appendTerminalToken(token),
+      onPassStarted: (pass) => updatePassState(pass, 'RUNNING'),
+      onPassCompleted: (pass, stats) => updatePassState(pass, 'COMPLETED', stats),
+      onComplete: (spec) => {
+        // CRITICAL: Close the connection so browser EventSource does not retry infinitely
+        sse.close();
+        setSseConnected(false);
+        handleExtractionComplete(spec);
+      },
+      onError: (err) => {
+        sse.close();
+        setSseConnected(false);
+        handleExtractionError(err);
+      },
+    });
+
+    sseSubRef.current = sse;
+
+    return () => {
+      if (sseSubRef.current) {
+        sseSubRef.current.close();
+        sseSubRef.current = null;
+      }
+      setSseConnected(false);
+    };
+  }, [effectiveRunId]); // ONLY effectiveRunId in dependency array
+
+  // Fix 2: Container-Scoped Terminal Auto-Scroll (No window or parent jumps)
+  const handleScroll = () => {
+    if (!terminalContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = terminalContainerRef.current;
+    // If user is within 60px of the bottom, keep auto-scrolling active
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 60;
+    setUserHasScrolledUp(!isNearBottom);
+  };
+
+  useEffect(() => {
+    if (autoScroll && !userHasScrolledUp && terminalContainerRef.current) {
+      terminalContainerRef.current.scrollTop = terminalContainerRef.current.scrollHeight;
+    }
+  }, [terminalLogs, autoScroll, userHasScrolledUp]);
 
   const handleCopyLogs = () => {
     const text = terminalLogs.join('');
@@ -141,9 +203,9 @@ export const TelemetryScreen: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-4 flex-1 h-full w-full max-w-7xl mx-auto">
+    <div className="flex flex-col gap-4 flex-1 h-full w-full max-w-7xl mx-auto overflow-hidden">
       {/* 1. TOP HEADER & RUN HUD */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3.5 bg-slate-900 border border-slate-800 rounded-xl shadow-sm">
+      <div className="shrink-0 flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3.5 bg-slate-900 border border-slate-800 rounded-xl shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5 font-mono text-xs">
             <span className="font-bold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800/60">
@@ -159,7 +221,7 @@ export const TelemetryScreen: React.FC = () => {
           {/* Run ID HUD */}
           <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
             <span className="text-slate-500">Run:</span>
-            <strong className="text-sky-300">#{inspectedRunId || runId || 'run-init'}</strong>
+            <strong className="text-sky-300">#{effectiveRunId || 'run-init'}</strong>
           </div>
 
           {/* Batch Status HUD */}
@@ -198,105 +260,76 @@ export const TelemetryScreen: React.FC = () => {
             </div>
           ) : isExtracting || sseConnected ? (
             <div className="flex items-center gap-2 px-3 py-1 bg-sky-950/80 border border-sky-800/80 rounded-full text-sky-400 text-xs font-mono font-bold shadow-sm animate-pulse">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-              </span>
-              <span>{activeBatch ? 'LIVE BATCH SSE STREAM' : 'LIVE SSE STREAM'}</span>
+              <Radio className="h-3.5 w-3.5 text-sky-400 animate-spin" />
+              <span>LIVE REASONING STREAM ACTIVE</span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 border border-slate-800 rounded-full text-slate-500 text-xs font-mono">
-              <Radio className="h-3 w-3" />
-              <span>CONNECTING...</span>
+            <div className="flex items-center gap-2 px-3 py-1 bg-slate-800/80 border border-slate-700/80 rounded-full text-slate-400 text-xs font-mono">
+              <Radio className="h-3.5 w-3.5 text-slate-500" />
+              <span>STREAM IDLE</span>
+            </div>
+          )}
+
+          {/* Token Burn Rate */}
+          {burnRate > 0 && isExtracting && (
+            <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-xs font-mono text-amber-400">
+              <Activity className="h-3.5 w-3.5" />
+              <span>~{burnRate} tok/s</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* 1.5 BATCH QUEUE MATRIX & ACTIVE STREAM SWITCHER */}
+      {/* 1.1 BATCH SLICES CAROUSEL / SELECTOR (Shown in Batch Mode) */}
       {activeBatch && activeBatch.slices.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2 text-xs font-mono">
-              <Layers className="h-4 w-4 text-sky-400" />
-              <span className="font-bold text-slate-200">BATCH QUEUE MATRIX</span>
-              <span className="text-slate-500 text-[11px]">
-                ({activeBatch.completed_slices} of {activeBatch.total_slices} slices complete)
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] font-mono">
-              <span className="text-slate-400">Batch ID:</span>
-              <span className="text-sky-300 font-bold">#{activeBatch.batch_id.slice(0, 10)}</span>
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                  activeBatch.status === 'COMPLETED'
-                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                    : activeBatch.status === 'PARTIAL_FAILURE'
-                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                    : activeBatch.status === 'FAILED'
-                    ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                    : 'bg-sky-950 text-sky-400 border border-sky-800 animate-pulse'
-                }`}
-              >
-                {activeBatch.status}
-              </span>
-            </div>
+        <div className="shrink-0 p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Layers className="h-3.5 w-3.5 text-sky-400" />
+              BATCH RUN SLICES ({activeBatch.slices.length}) — Click to Inspect Live Stream:
+            </span>
+            <span className="text-slate-400">
+              Worker Pool: 3 concurrent | Overall Progress:{' '}
+              {Math.round((activeBatch.completed_slices / activeBatch.total_slices) * 100)}%
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             {activeBatch.slices.map((slice) => {
-              const isInspected =
-                slice.run_id === inspectedRunId || (slice.run_id === runId && !inspectedRunId);
+              const isSelected = slice.run_id === inspectedRunId;
+              const isSliceDone = slice.status === 'COMPLETED';
+              const isSliceRunning = slice.status === 'RUNNING';
+
               return (
                 <button
                   key={slice.run_id}
                   onClick={() => setInspectedRunId(slice.run_id)}
-                  className={`p-2.5 rounded-lg border text-left transition-all duration-200 flex flex-col justify-between ${
-                    isInspected
-                      ? 'bg-sky-950/70 border-sky-500 ring-1 ring-sky-500/50 shadow-md shadow-sky-500/10'
-                      : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                  className={`px-3 py-2 rounded-lg border text-left flex flex-col gap-1 transition-all shrink-0 min-w-[200px] cursor-pointer ${
+                    isSelected
+                      ? 'bg-sky-950/60 border-sky-500 ring-1 ring-sky-500 shadow-md'
+                      : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                    <span
-                      className="font-mono text-xs font-bold text-white truncate max-w-[150px]"
-                      title={slice.class_name}
-                    >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold text-white truncate max-w-[130px]">
                       {slice.class_name}
                     </span>
-                    {isInspected && (
-                      <span className="flex items-center gap-1 text-[10px] font-mono font-bold text-sky-300 bg-sky-900/80 px-1.5 py-0.5 rounded border border-sky-700/60 shrink-0">
-                        <Eye className="h-2.5 w-2.5" />
-                        Active View
-                      </span>
-                    )}
+                    {isSliceDone && <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />}
+                    {isSliceRunning && <Loader2 className="h-3 w-3 text-sky-400 animate-spin shrink-0" />}
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] font-mono">
-                    {slice.status === 'RUNNING' && (
-                      <span className="flex items-center gap-1 text-sky-400 font-semibold animate-pulse">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        {slice.current_pass ? `Pass ${slice.current_pass}` : 'Running'}
-                      </span>
-                    )}
-                    {slice.status === 'COMPLETED' && (
-                      <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Completed
-                      </span>
-                    )}
-                    {slice.status === 'QUEUED' && (
-                      <span className="flex items-center gap-1 text-slate-500">
-                        <Clock className="h-3 w-3" />
-                        Queued
-                      </span>
-                    )}
-                    {slice.status === 'FAILED' && (
-                      <span className="flex items-center gap-1 text-rose-400 font-semibold">
-                        <AlertTriangle className="h-3 w-3" />
-                        Failed
-                      </span>
-                    )}
+                    <span
+                      className={`font-semibold ${
+                        isSliceDone
+                          ? 'text-emerald-400'
+                          : isSliceRunning
+                          ? 'text-sky-300'
+                          : 'text-slate-400'
+                      }`}
+                    >
+                      {slice.status === 'RUNNING' ? `Pass ${slice.current_pass || 1}` : slice.status}
+                    </span>
 
                     <span className="text-slate-400 text-[10px]">
                       {slice.tokens_consumed > 0 ? `${slice.tokens_consumed.toLocaleString()} tok` : '--'}
@@ -310,7 +343,7 @@ export const TelemetryScreen: React.FC = () => {
       )}
 
       {/* 2. 3-CARD VISUAL STEPPER */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+      <div className="shrink-0 grid grid-cols-1 md:grid-cols-3 gap-3.5">
         {passes.map((p) => {
           const isRunning = p.state?.status === 'RUNNING';
           const isCompleted = p.state?.status === 'COMPLETED';
@@ -387,10 +420,10 @@ export const TelemetryScreen: React.FC = () => {
         })}
       </div>
 
-      {/* 3. LIVE TERMINAL VIEWER */}
-      <div className="flex-1 flex flex-col bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl min-h-[380px]">
+      {/* 3. LIVE TERMINAL VIEWER (Strict Layout Bounds: flex-1 min-h-0) */}
+      <div className="flex-1 min-h-0 flex flex-col bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
         {/* Terminal HUD & Controls */}
-        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-xs font-mono">
+        <div className="shrink-0 flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-xs font-mono">
           <div className="flex items-center gap-2 text-slate-200">
             <Terminal className="h-4 w-4 text-sky-400" />
             <span className="font-bold">LIVE REASONING & TOKEN STREAM</span>
@@ -422,7 +455,16 @@ export const TelemetryScreen: React.FC = () => {
               <input
                 type="checkbox"
                 checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setAutoScroll(checked);
+                  if (checked) {
+                    setUserHasScrolledUp(false);
+                    if (terminalContainerRef.current) {
+                      terminalContainerRef.current.scrollTop = terminalContainerRef.current.scrollHeight;
+                    }
+                  }
+                }}
                 className="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0"
               />
               Auto-Scroll
@@ -430,8 +472,12 @@ export const TelemetryScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Monospace Code Stream */}
-        <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-1 bg-slate-950/95 leading-relaxed text-slate-300 min-h-[280px]">
+        {/* Monospace Code Stream — Container-Bounded Scrolling */}
+        <div
+          ref={terminalContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 min-h-0 p-4 font-mono text-xs overflow-y-auto space-y-1 bg-slate-950/95 leading-relaxed text-slate-300"
+        >
           {terminalLogs.length === 0 ? (
             <div className="text-slate-600 italic py-6 text-center">
               Waiting for cognitive extraction telemetry stream...
@@ -458,13 +504,11 @@ export const TelemetryScreen: React.FC = () => {
               █
             </span>
           )}
-
-          <div ref={terminalEndRef} />
         </div>
       </div>
 
       {/* 4. METRICS & STEP HANDOFF FOOTER */}
-      <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="shrink-0 p-4 bg-slate-900 border border-slate-800 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Token Budget Gauge */}
         <div className="flex-1 flex flex-col gap-1.5 max-w-md">
           <div className="flex items-center justify-between font-mono text-xs">

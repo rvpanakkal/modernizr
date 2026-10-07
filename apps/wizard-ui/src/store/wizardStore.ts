@@ -230,7 +230,10 @@ interface WizardState {
   pollBatchStatus: (batchId: string) => Promise<void>;
   appendTerminalToken: (token: string) => void;
   setPassCompleted: (passNumber: 1 | 2 | 3, stats: { latencyMs: number; tokens: number }) => void;
+  updatePassState: (pass: number, status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED', stats?: { latencyMs?: number; tokens?: number }) => void;
   completeExtraction: (spec: GeneratedSpecification) => void;
+  handleExtractionComplete: (spec: GeneratedSpecification) => void;
+  handleExtractionError: (err: any) => void;
   clearTerminalLogs: () => void;
 
   // Screen 4 HITL Actions
@@ -519,77 +522,12 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     try {
       const res = await apiClient.startPipelineRun(fqn, slicePayload, 'jira');
       const runId = res.run_id;
-      set({ runId, isLoading: false });
-
-      // Connect SSE pipeline client with typed listeners
-      sseClient.connect(
-        runId,
-        (event: TelemetryEvent) => {
-          get().appendTelemetry(event);
-
-          if (event.type === 'PASS_STARTED' && event.pass_number) {
-            const pNum = event.pass_number as 1 | 2 | 3;
-            set((state) => ({
-              currentPass: pNum,
-              passStates: {
-                ...state.passStates,
-                [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
-              },
-            }));
-          } else if (event.type === 'TOKEN_CHUNK' && event.token) {
-            get().appendTerminalToken(event.token);
-            if (event.pass && event.cumulative_tokens) {
-              const pNum = event.pass as 1 | 2 | 3;
-              set((state) => ({
-                passStates: {
-                  ...state.passStates,
-                  [pNum]: { ...state.passStates[pNum], tokens: event.cumulative_tokens || state.passStates[pNum].tokens },
-                },
-              }));
-            }
-          } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
-            get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
-              latencyMs: event.latency_ms || 0,
-              tokens: event.tokens || 0,
-            });
-          } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
-            get().completeExtraction(event.spec);
-          }
-        },
-        (error) => {
-          console.warn('[SSE] Extraction stream warning:', error);
-        }
-      );
+      set({ runId, isLoading: false, isExtracting: true });
     } catch (err) {
       console.warn('Failed to start pipeline run through API; falling back to simulator:', err);
       set({ isLoading: false });
       const fallbackRunId = `run-${Math.random().toString(36).substring(2, 9)}`;
-      set({ runId: fallbackRunId });
-      sseClient.connect(
-        fallbackRunId,
-        (event: TelemetryEvent) => {
-          get().appendTelemetry(event);
-          if (event.type === 'PASS_STARTED' && event.pass_number) {
-            const pNum = event.pass_number as 1 | 2 | 3;
-            set((state) => ({
-              currentPass: pNum,
-              passStates: {
-                ...state.passStates,
-                [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
-              },
-            }));
-          } else if (event.type === 'TOKEN_CHUNK' && event.token) {
-            get().appendTerminalToken(event.token);
-          } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
-            get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
-              latencyMs: event.latency_ms || 0,
-              tokens: event.tokens || 0,
-            });
-          } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
-            get().completeExtraction(event.spec);
-          }
-        }
-      );
+      set({ runId: fallbackRunId, isExtracting: true });
     }
   },
 
@@ -606,6 +544,34 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         [passNumber]: { status: 'COMPLETED', latencyMs: stats.latencyMs, tokens: stats.tokens },
       },
     }));
+  },
+
+  updatePassState: (
+    pass: number,
+    status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED',
+    stats?: { latencyMs?: number; tokens?: number }
+  ) => {
+    const pNum = pass as 1 | 2 | 3;
+    set((state) => ({
+      currentPass: status === 'RUNNING' ? pNum : state.currentPass,
+      passStates: {
+        ...state.passStates,
+        [pNum]: {
+          status,
+          latencyMs: stats?.latencyMs ?? state.passStates[pNum].latencyMs,
+          tokens: stats?.tokens ?? state.passStates[pNum].tokens,
+        },
+      },
+    }));
+  },
+
+  handleExtractionComplete: (spec: GeneratedSpecification) => {
+    get().completeExtraction(spec);
+  },
+
+  handleExtractionError: (err: any) => {
+    console.warn('[wizardStore] Extraction error:', err);
+    set({ isExtracting: false });
   },
 
   completeExtraction: (spec: GeneratedSpecification) => {
@@ -725,49 +691,6 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         3: { status: 'PENDING', latencyMs: 0, tokens: 0 },
       },
     });
-
-    sseClient.disconnect();
-    sseClient.connect(
-      runId,
-      (event: TelemetryEvent) => {
-        get().appendTelemetry(event);
-
-        if (event.type === 'PASS_STARTED' && event.pass_number) {
-          const pNum = event.pass_number as 1 | 2 | 3;
-          set((state) => ({
-            currentPass: pNum,
-            passStates: {
-              ...state.passStates,
-              [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
-            },
-          }));
-        } else if (event.type === 'TOKEN_CHUNK' && event.token) {
-          get().appendTerminalToken(event.token);
-          if (event.pass && event.cumulative_tokens) {
-            const pNum = event.pass as 1 | 2 | 3;
-            set((state) => ({
-              passStates: {
-                ...state.passStates,
-                [pNum]: {
-                  ...state.passStates[pNum],
-                  tokens: event.cumulative_tokens || state.passStates[pNum].tokens,
-                },
-              },
-            }));
-          }
-        } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
-          get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
-            latencyMs: event.latency_ms || 0,
-            tokens: event.tokens || 0,
-          });
-        } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
-          get().completeExtraction(event.spec);
-        }
-      },
-      (error) => {
-        console.warn(`[SSE] Stream warning for slice ${runId}:`, error);
-      }
-    );
   },
 
   pollBatchStatus: async (batchId: string) => {
