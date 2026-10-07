@@ -110,10 +110,21 @@ def test_pipeline_runs_and_spec_lifecycle():
     assert len(spec_data["spec_sha256"]) == 64
 
     # 3. Hitl Revise
-    revise_resp = client.post(
-        "/api/hitl/revise",
-        json={"run_id": run_id, "feedback": "Enforce high-risk transaction flag for transfers > $10,000", "target_pass": 2},
-    )
+    import os
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        from unittest.mock import AsyncMock, patch
+        from pipeline_core.schemas.spec import GeneratedSpecification
+        mock_spec = GeneratedSpecification.model_validate(spec_data["spec"])
+        with patch("api.routers.hitl.generate_targeted_revision", new=AsyncMock(return_value=mock_spec)):
+            revise_resp = client.post(
+                "/api/hitl/revise",
+                json={"run_id": run_id, "feedback": "Enforce high-risk transaction flag for transfers > $10,000", "target_pass": 2},
+            )
+    else:
+        revise_resp = client.post(
+            "/api/hitl/revise",
+            json={"run_id": run_id, "feedback": "Enforce high-risk transaction flag for transfers > $10,000", "target_pass": 2},
+        )
     assert revise_resp.status_code == 200
     revised_data = revise_resp.json()
     assert revised_data["status"] == "REVISED"

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -92,6 +92,9 @@ class BusinessRule(BaseModel):
         default_factory=list,
         description="Legacy class FQNs / method signatures this rule was derived from",
     )
+    name: Optional[str] = Field(default=None)
+    severity: Optional[str] = Field(default=None)
+    traceability: Optional[TraceabilityAnchor] = Field(default=None)
 
 
 class BusinessRuleSet(BaseModel):
@@ -130,6 +133,11 @@ class BddScenario(BaseModel):
         ..., min_length=1,
         description="Legacy FQN/method keys; each must also be a key of GeneratedSpecification.legacy_traceability",
     )
+    scenario_id: Optional[str] = Field(default=None)
+    title: Optional[str] = Field(default=None)
+    gherkin_text: Optional[str] = Field(default=None)
+    linked_rule_ids: List[str] = Field(default_factory=list)
+    traceability: Optional[TraceabilityAnchor] = Field(default=None)
 
     @field_validator("given", "then", mode="after")
     @classmethod
@@ -172,9 +180,19 @@ class GeneratedSpecification(BaseModel):
     )
     tracker_type: Optional[str] = Field(default="jira", description="Issue tracker type: jira, github, local, etc.")
     run_id: Optional[str] = Field(default=None)
+    created_at: Optional[str] = Field(default=None)
+    bdd_scenarios: List[Any] = Field(default_factory=list)
+    openapi_spec_yaml: Optional[str] = Field(default="")
+    legacy_source_snapshot: Optional[str] = Field(default="")
+    sha256_hash: Optional[str] = Field(default="")
+    entry_fqn: Optional[str] = Field(default="com.legacy.banking.service.TransferProcessingService")
 
     @model_validator(mode="after")
     def _cross_reference_integrity(self) -> "GeneratedSpecification":
+        if not self.scenarios and self.bdd_scenarios:
+            self.scenarios = self.bdd_scenarios
+        elif not self.bdd_scenarios and self.scenarios:
+            self.bdd_scenarios = self.scenarios
         _assert_unique_rule_ids(self.business_rules)
         trace_keys = set(self.legacy_traceability)
         for scenario in self.scenarios:

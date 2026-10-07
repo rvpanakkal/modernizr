@@ -41,6 +41,10 @@ artifacts/receipts/*
 !artifacts/receipts/.gitkeep
 artifacts/generated_specs/*
 !artifacts/generated_specs/.gitkeep
+artifacts/approved_specs/*
+!artifacts/approved_specs/.gitkeep
+artifacts/specs/*
+!artifacts/specs/.gitkeep
 modules/pipeline-core/artifacts/
 artifacts/target_code/run-*/
 

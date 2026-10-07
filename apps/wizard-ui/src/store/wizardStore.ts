@@ -16,6 +16,7 @@ import { apiClient } from '../services/api';
 import { GeneratedSpecification, PassState, PassStatus, TelemetryEvent } from '../types/telemetry';
 import { BatchRunStatus, SliceRunSummary } from '../types/batch';
 import { sseClient } from '../services/sseClient';
+import { HitlReviewPayload } from '../types/hitl';
 
 export type EntrypointItem = EntryPoint;
 export type SliceData = VerticalSliceResponse;
@@ -96,6 +97,32 @@ export interface TelemetryLog {
   raw?: any;
 }
 
+export function formatSpecGherkin(spec: GeneratedSpecification): string {
+  const scenarios = spec.bdd_scenarios?.length ? spec.bdd_scenarios : (spec.scenarios || []);
+  if (scenarios.length === 0) return '# No BDD scenarios extracted';
+
+  const lines: string[] = [];
+  lines.push(`Feature: ${spec.feature_name || 'Modernized Service Feature'}`);
+  lines.push(`  As a banking platform service`);
+  lines.push(`  I want deterministic transaction processing`);
+  lines.push(`  So that account balances remain consistent and compliant\n`);
+
+  scenarios.forEach((sc: any) => {
+    if (sc.gherkin_text) {
+      lines.push(sc.gherkin_text.trim());
+      lines.push('');
+    } else {
+      lines.push(`  Scenario: ${sc.title || sc.name}`);
+      sc.given?.forEach((g: string) => lines.push(`    Given ${g}`));
+      if (sc.when) lines.push(`    When ${sc.when}`);
+      sc.then?.forEach((t: string) => lines.push(`    Then ${t}`));
+      lines.push('');
+    }
+  });
+
+  return lines.join('\n');
+}
+
 interface WizardState {
   currentStep: number;
   maxCompletedStep: number;
@@ -151,15 +178,27 @@ interface WizardState {
   burnRate: number;
   isExtractionComplete: boolean;
 
-  // Screen 4: HITL Review
+  // Screen 4: HITL Review & Gating Cockpit
+  hitlData: HitlReviewPayload | null;
   specData: GeneratedSpec | null;
   legacySource: string;
+  activeLegacyFile: string;
   specSha256: string;
   highlightedLines: [number, number] | null;
   activeScenarioName: string | null;
+  activeScenarioId: string | null;
   hitlApproved: boolean;
   approvedBy: string;
   jiraStoryId: string;
+  aggregateRoot: string;
+  jiraEpicKey: string;
+  jiraStoryKey: string;
+  reviewFeedback: string;
+  isRevising: boolean;
+  isApproving: boolean;
+  hitlError: string | null;
+  editableSpecGherkin: string;
+  editableSpecOpenApi: string;
 
   // Screen 5: Synthesis
   catalogMatch: CatalogMatchData | null;
@@ -193,6 +232,19 @@ interface WizardState {
   setPassCompleted: (passNumber: 1 | 2 | 3, stats: { latencyMs: number; tokens: number }) => void;
   completeExtraction: (spec: GeneratedSpecification) => void;
   clearTerminalLogs: () => void;
+
+  // Screen 4 HITL Actions
+  fetchHitlData: (runId?: string) => Promise<void>;
+  setActiveLegacyFile: (fileName: string) => void;
+  selectScenario: (scenarioIdOrTitle: string) => void;
+  setAggregateRoot: (root: string) => void;
+  setJiraEpicKey: (key: string) => void;
+  setJiraStoryKey: (key: string) => void;
+  setReviewFeedback: (feedback: string) => void;
+  setEditableSpecGherkin: (text: string) => void;
+  setEditableSpecOpenApi: (text: string) => void;
+  submitAiRevision: (feedbackText?: string, manualEdits?: string) => Promise<void>;
+  approveAndProceed: () => Promise<void>;
 
   setStep: (step: number) => void;
   setMonolithInfo: (info: any) => void;
@@ -269,14 +321,26 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   burnRate: 0,
   isExtractionComplete: false,
 
+  hitlData: null,
   specData: null,
   legacySource: '',
+  activeLegacyFile: 'TransferProcessingService.java',
   specSha256: '',
   highlightedLines: null,
   activeScenarioName: null,
+  activeScenarioId: null,
   hitlApproved: false,
-  approvedBy: '',
+  approvedBy: 'Enterprise Lead Architect',
   jiraStoryId: 'MOD-101',
+  aggregateRoot: 'Account',
+  jiraEpicKey: 'MOD-EPIC-12',
+  jiraStoryKey: 'MOD-101',
+  reviewFeedback: '',
+  isRevising: false,
+  isApproving: false,
+  hitlError: null,
+  editableSpecGherkin: '',
+  editableSpecOpenApi: '',
 
   catalogMatch: null,
   targetStack: 'spring_boot_3_5',
@@ -888,6 +952,201 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       approvedBy: approver || 'Enterprise Lead Architect',
       maxCompletedStep: Math.max(get().maxCompletedStep, 4),
     });
+  },
+
+  fetchHitlData: async (runIdParam?: string) => {
+    const activeRunId = runIdParam || get().runId || 'run-canonical';
+    try {
+      const data = await apiClient.getHitlReviewData(activeRunId);
+      const spec = data.spec;
+      const gherkinText = formatSpecGherkin(spec);
+      const openApiText = spec.openapi_spec_yaml || '';
+
+      const legacyFiles = Object.keys(data.legacy_sources || {});
+      const activeLegacyFile = legacyFiles.length > 0 ? legacyFiles[0] : 'TransferProcessingService.java';
+      const initialSource = data.legacy_sources?.[activeLegacyFile] || data.legacy_source || '';
+
+      const scenarios = spec.bdd_scenarios?.length ? spec.bdd_scenarios : (spec.scenarios || []);
+      const firstScenario = scenarios[0];
+      const initialHighlight: [number, number] | null = firstScenario?.traceability
+        ? [firstScenario.traceability.start_line, firstScenario.traceability.end_line]
+        : null;
+
+      set({
+        hitlData: data,
+        currentSpec: spec,
+        specData: spec as any,
+        runId: data.run_id,
+        specSha256: data.spec_sha256,
+        jiraStoryId: data.jira_story_id || 'MOD-101',
+        jiraStoryKey: data.jira_story_id || 'MOD-101',
+        hitlApproved: data.hitl_approved,
+        legacySource: initialSource,
+        activeLegacyFile,
+        editableSpecGherkin: gherkinText,
+        editableSpecOpenApi: openApiText,
+        activeScenarioId: firstScenario ? (firstScenario.scenario_id || firstScenario.title || (firstScenario as any).name) : null,
+        activeScenarioName: firstScenario ? (firstScenario.title || (firstScenario as any).name) : null,
+        highlightedLines: initialHighlight,
+        hitlError: null,
+      });
+    } catch (err: any) {
+      console.error('[wizardStore] fetchHitlData error:', err);
+      const errorMsg = err?.response?.data?.detail || err?.message || 'Failed to fetch HITL review payload';
+      set({ hitlError: errorMsg });
+    }
+  },
+
+  setActiveLegacyFile: (fileName: string) => {
+    const data = get().hitlData;
+    const source = data?.legacy_sources?.[fileName] || '';
+    set({
+      activeLegacyFile: fileName,
+      legacySource: source,
+    });
+  },
+
+  selectScenario: (scenarioIdOrTitle: string) => {
+    const spec = get().currentSpec || (get().hitlData?.spec as GeneratedSpecification);
+    if (!spec) return;
+
+    const scenarios = spec.bdd_scenarios?.length ? spec.bdd_scenarios : (spec.scenarios || []);
+    const match = scenarios.find(
+      (s: any) =>
+        s.scenario_id === scenarioIdOrTitle ||
+        s.title === scenarioIdOrTitle ||
+        s.name === scenarioIdOrTitle
+    );
+
+    if (match) {
+      const scenarioId = match.scenario_id || match.title || (match as any).name;
+      const scenarioTitle = match.title || (match as any).name;
+      let highlight: [number, number] | null = null;
+      let targetFile = get().activeLegacyFile;
+
+      if (match.traceability) {
+        highlight = [match.traceability.start_line, match.traceability.end_line];
+        if (match.traceability.legacy_file) {
+          const parts = match.traceability.legacy_file.split(/[\/\\]/);
+          const baseName = parts[parts.length - 1];
+          if (get().hitlData?.legacy_sources?.[baseName]) {
+            targetFile = baseName;
+          }
+        }
+      }
+
+      const legacySource = get().hitlData?.legacy_sources?.[targetFile] || get().legacySource;
+
+      set({
+        activeScenarioId: scenarioId,
+        activeScenarioName: scenarioTitle,
+        highlightedLines: highlight,
+        activeLegacyFile: targetFile,
+        legacySource,
+      });
+    }
+  },
+
+  setAggregateRoot: (root: string) => set({ aggregateRoot: root }),
+  setJiraEpicKey: (key: string) => set({ jiraEpicKey: key }),
+  setJiraStoryKey: (key: string) => set({ jiraStoryKey: key }),
+  setReviewFeedback: (feedback: string) => set({ reviewFeedback: feedback }),
+  setEditableSpecGherkin: (text: string) => set({ editableSpecGherkin: text }),
+  setEditableSpecOpenApi: (text: string) => set({ editableSpecOpenApi: text }),
+
+  submitAiRevision: async (feedbackText?: string, manualEdits?: string) => {
+    const feedback = feedbackText || get().reviewFeedback;
+    if (!feedback || !feedback.trim()) {
+      set({ hitlError: 'Reviewer feedback is required before triggering revision.' });
+      return;
+    }
+
+    const activeRunId = get().runId || 'run-canonical';
+    set({ isRevising: true, hitlError: null });
+
+    try {
+      const res = await apiClient.reviseSpecWithAi({
+        run_id: activeRunId,
+        reviewer_feedback: feedback,
+        manual_edits: manualEdits || get().editableSpecGherkin,
+        target_pass: 2,
+      });
+
+      const revised = res.revised_spec;
+      const gherkinText = formatSpecGherkin(revised);
+      const openApiText = revised.openapi_spec_yaml || res.openapi_spec_yaml || '';
+
+      const existingData = get().hitlData;
+      const updatedHitlData: HitlReviewPayload = existingData
+        ? {
+            ...existingData,
+            spec: revised,
+            spec_sha256: res.spec_sha256,
+          }
+        : {
+            spec: revised,
+            legacy_sources: { [get().activeLegacyFile || 'TransferProcessingService.java']: get().legacySource },
+            run_id: activeRunId,
+            jira_story_id: revised.jira_story_id || get().jiraStoryId,
+            legacy_source: get().legacySource,
+            spec_sha256: res.spec_sha256,
+            status: 'REVISED',
+            hitl_approved: false,
+          };
+
+      const scenarios = revised.bdd_scenarios?.length ? revised.bdd_scenarios : (revised.scenarios || []);
+      const firstScenario = scenarios[0];
+
+      set({
+        isRevising: false,
+        hitlData: updatedHitlData,
+        currentSpec: revised,
+        specData: revised as any,
+        specSha256: res.spec_sha256,
+        editableSpecGherkin: gherkinText,
+        editableSpecOpenApi: openApiText,
+        reviewFeedback: '',
+        activeScenarioId: firstScenario ? (firstScenario.scenario_id || firstScenario.title || (firstScenario as any).name) : null,
+        activeScenarioName: firstScenario ? (firstScenario.title || (firstScenario as any).name) : null,
+        highlightedLines: firstScenario?.traceability ? [firstScenario.traceability.start_line, firstScenario.traceability.end_line] : null,
+      });
+    } catch (err: any) {
+      console.error('[wizardStore] submitAiRevision error:', err);
+      const errorMsg = err?.response?.data?.detail || err?.message || 'AI Revision failed';
+      set({ isRevising: false, hitlError: errorMsg });
+      throw err;
+    }
+  },
+
+  approveAndProceed: async () => {
+    const activeRunId = get().runId || 'run-canonical';
+    set({ isApproving: true, hitlError: null });
+
+    try {
+      const res = await apiClient.approveHitlSpec({
+        run_id: activeRunId,
+        aggregate_root: get().aggregateRoot || 'Account',
+        jira_epic_key: get().jiraEpicKey || 'MOD-EPIC-12',
+        jira_story_key: get().jiraStoryKey || get().jiraStoryId || 'MOD-101',
+        final_gherkin: get().editableSpecGherkin,
+        final_openapi: get().editableSpecOpenApi,
+        approved_by: get().approvedBy || 'Enterprise Lead Architect',
+        spec_sha256: get().specSha256,
+      });
+
+      set({
+        isApproving: false,
+        hitlApproved: true,
+        approvedBy: res.approved_by,
+        maxCompletedStep: Math.max(get().maxCompletedStep, 4),
+        currentStep: 5,
+      });
+    } catch (err: any) {
+      console.error('[wizardStore] approveAndProceed error:', err);
+      const errorMsg = err?.response?.data?.detail || err?.message || 'Approval failed';
+      set({ isApproving: false, hitlError: errorMsg });
+      throw err;
+    }
   },
 
   setCatalogMatch: (match: CatalogMatchData) => {

@@ -9,6 +9,13 @@ import {
 import { Diagnostics, UploadResponse, IngestionStats } from '../types/source';
 import { EntryPoint, GraphNode, GraphEdge, SliceResponse, VerticalSliceResponse } from '../types/graph';
 import { BatchRunRequest, BatchRunStatus, SliceRunSummary } from '../types/batch';
+import {
+  HitlReviewPayload,
+  HitlRevisionRequest,
+  HitlReviseResponse,
+  HitlApprovalRequest,
+  HitlApprovalResponse,
+} from '../types/hitl';
 
 const isMockMode = import.meta.env.VITE_MOCK_MODE === 'true';
 
@@ -995,6 +1002,21 @@ export const apiClient = {
     activeProfileIdInMemory = res.data.profile_id;
     return res.data;
   },
+
+  async getHitlReviewData(runId: string): Promise<HitlReviewPayload> {
+    const res = await api.get(`/api/hitl/spec/${runId}`);
+    return res.data;
+  },
+
+  async reviseSpecWithAi(request: HitlRevisionRequest): Promise<HitlReviseResponse> {
+    const res = await api.post('/api/hitl/revise', request);
+    return res.data;
+  },
+
+  async approveHitlSpec(request: HitlApprovalRequest): Promise<HitlApprovalResponse> {
+    const res = await api.post('/api/hitl/approve', request);
+    return res.data;
+  },
 };
 
 // Standalone exports for Screen 2 and graph topology
@@ -1004,4 +1026,9 @@ export const getVerticalSlice = (entryFqn: string, maxDepth: number = 5): Promis
 export const startBatchRun = (entryFqns: string[], maxDepth: number = 5): Promise<BatchRunStatus> => apiClient.startBatchRun(entryFqns, maxDepth);
 export const getBatchStatus = (batchId: string): Promise<BatchRunStatus> => apiClient.getBatchStatus(batchId);
 export const listBatches = (): Promise<BatchRunStatus[]> => apiClient.listBatches();
+
+// Standalone exports for Step 4 HITL Review & Gating
+export const getHitlReviewData = (runId: string): Promise<HitlReviewPayload> => apiClient.getHitlReviewData(runId);
+export const reviseSpecWithAi = (request: HitlRevisionRequest): Promise<HitlReviseResponse> => apiClient.reviseSpecWithAi(request);
+export const approveHitlSpec = (request: HitlApprovalRequest): Promise<HitlApprovalResponse> => apiClient.approveHitlSpec(request);
 
