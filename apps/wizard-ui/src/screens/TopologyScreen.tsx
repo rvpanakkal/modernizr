@@ -25,7 +25,12 @@ export const TopologyScreen: React.FC = () => {
   const {
     entrypoints,
     selectedEntryPoint,
+    selectedEntryPoints,
     selectEntryPoint,
+    toggleEntryPointSelection,
+    selectAllEntryPoints,
+    clearEntryPointSelection,
+    startBatchExtraction,
     sliceDepth,
     setSliceDepth,
     sliceData,
@@ -66,11 +71,18 @@ export const TopologyScreen: React.FC = () => {
     selectEntryPoint(entry);
   };
 
+  const selectedCount = selectedEntryPoints.size;
+  const isBatchMode = selectedCount > 1;
+
   const handleProceed = async () => {
-    if (!selectedEntryPoint || !sliceData || isGraphLoading || isExtracting) return;
+    if (isExtracting || isGraphLoading) return;
     setIsExtracting(true);
     try {
-      await proceedToExtraction();
+      if (isBatchMode) {
+        await startBatchExtraction();
+      } else {
+        await proceedToExtraction();
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -159,17 +171,22 @@ export const TopologyScreen: React.FC = () => {
 
         <button
           onClick={handleProceed}
-          disabled={!sliceData || isExtracting || isGraphLoading || isOverBudget || !selectedEntryPoint}
+          disabled={(!isBatchMode && (!sliceData || isOverBudget || !selectedEntryPoint)) || isExtracting || isGraphLoading}
           className="flex items-center gap-2 py-2 px-4 rounded-xl font-semibold text-xs text-white bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-md shadow-sky-500/20 disabled:opacity-50 transition cursor-pointer disabled:cursor-not-allowed"
         >
           {isExtracting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Extracting Slice...</span>
+              <span>{isBatchMode ? `Extracting ${selectedCount} Slices...` : 'Extracting Slice...'}</span>
+            </>
+          ) : isBatchMode ? (
+            <>
+              <span>Batch Extract ({selectedCount} Slices)</span>
+              <ArrowRight className="h-4 w-4" />
             </>
           ) : (
             <>
-              <span>Extract Vertical Slice & Proceed</span>
+              <span>Extract Vertical Slice (Single)</span>
               <ArrowRight className="h-4 w-4" />
             </>
           )}
@@ -199,8 +216,31 @@ export const TopologyScreen: React.FC = () => {
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
               <Layers className="h-3.5 w-3.5 text-sky-400" />
-              Entrypoint Catalog ({entrypoints.length})
+              Catalog ({entrypoints.length})
             </span>
+            {selectedCount > 0 && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-950 border border-sky-800 text-sky-300 font-bold">
+                {selectedCount} Selected
+              </span>
+            )}
+          </div>
+
+          {/* Quick Selection Actions */}
+          <div className="flex items-center justify-between text-[11px] font-mono px-0.5">
+            <button
+              onClick={() => selectAllEntryPoints(filteredEntrypoints.map((e) => e.fqn))}
+              className="text-sky-400 hover:text-sky-300 hover:underline cursor-pointer"
+            >
+              Select Visible ({filteredEntrypoints.length})
+            </button>
+            {selectedCount > 0 && (
+              <button
+                onClick={clearEntryPointSelection}
+                className="text-slate-500 hover:text-slate-300 hover:underline cursor-pointer"
+              >
+                Clear Selection
+              </button>
+            )}
           </div>
 
           {/* Search Filter */}
@@ -250,44 +290,65 @@ export const TopologyScreen: React.FC = () => {
             {filteredEntrypoints.length > 0 ? (
               filteredEntrypoints.map((entry) => {
                 const isSelected = selectedEntryPoint?.fqn === entry.fqn;
+                const isChecked = selectedEntryPoints.has(entry.fqn);
                 const displayName = entry.class_name || entry.simple_name || entry.fqn.split('.').pop();
                 const marker = entry.framework_marker || (entry.annotations && entry.annotations[0]) || '@ManagedBean';
                 const methodCount = entry.method_count ?? (entry as any).methods_count ?? 0;
                 const lineCount = entry.line_count ?? 0;
 
                 return (
-                  <button
+                  <div
                     key={entry.fqn}
                     onClick={() => handleSelectEntrypoint(entry)}
-                    className={`w-full p-2.5 rounded-lg border text-left transition flex flex-col gap-1.5 ${
+                    className={`w-full p-2.5 rounded-lg border text-left transition flex items-start gap-2.5 cursor-pointer ${
                       isSelected
                         ? 'bg-sky-950/70 border-sky-500 text-sky-200 ring-1 ring-sky-500/50'
+                        : isChecked
+                        ? 'bg-slate-900/90 border-slate-700 text-slate-200 ring-1 ring-slate-700'
                         : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:bg-slate-800/40 hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono text-xs font-bold truncate">
-                        {displayName}
-                      </span>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0 font-medium">
-                        {entry.layer}
-                      </span>
+                    {/* Multi-select Checkbox */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleEntryPointSelection(entry.fqn);
+                      }}
+                      className="pt-0.5 shrink-0"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
+                      />
                     </div>
 
-                    <span className="text-[10px] text-slate-500 font-mono truncate">
-                      {entry.fqn}
-                    </span>
+                    <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-mono text-xs font-bold truncate">
+                          {displayName}
+                        </span>
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0 font-medium">
+                          {entry.layer}
+                        </span>
+                      </div>
 
-                    <div className="flex items-center justify-between gap-1 pt-0.5 text-[10px] font-mono text-slate-400">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/60 text-amber-300">
-                        {marker.startsWith('@') ? marker : `@${marker}`}
+                      <span className="text-[10px] text-slate-500 font-mono truncate">
+                        {entry.fqn}
                       </span>
-                      <div className="flex items-center gap-2 text-slate-500 text-[10px]">
-                        <span>{methodCount} methods</span>
-                        {lineCount > 0 && <span>• {lineCount} lines</span>}
+
+                      <div className="flex items-center justify-between gap-1 pt-0.5 text-[10px] font-mono text-slate-400">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/60 text-amber-300">
+                          {marker.startsWith('@') ? marker : `@${marker}`}
+                        </span>
+                        <div className="flex items-center gap-2 text-slate-500 text-[10px]">
+                          <span>{methodCount} methods</span>
+                          {lineCount > 0 && <span>• {lineCount} lines</span>}
+                        </div>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })
             ) : (
@@ -488,17 +549,22 @@ export const TopologyScreen: React.FC = () => {
           <div className="pt-2 border-t border-slate-800">
             <button
               onClick={handleProceed}
-              disabled={!sliceData || isExtracting || isGraphLoading || isOverBudget || !selectedEntryPoint}
+              disabled={(!isBatchMode && (!sliceData || isOverBudget || !selectedEntryPoint)) || isExtracting || isGraphLoading}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg font-semibold text-xs text-white bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-md shadow-sky-500/20 disabled:opacity-50 transition cursor-pointer disabled:cursor-not-allowed"
             >
               {isExtracting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Extracting Vertical Slice...</span>
+                  <span>{isBatchMode ? `Extracting ${selectedCount} Slices...` : 'Extracting Vertical Slice...'}</span>
+                </>
+              ) : isBatchMode ? (
+                <>
+                  <span>Batch Extract ({selectedCount} Slices)</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </>
               ) : (
                 <>
-                  <span>Extract Vertical Slice & Proceed</span>
+                  <span>Extract Vertical Slice (Single)</span>
                   <ArrowRight className="h-3.5 w-3.5" />
                 </>
               )}

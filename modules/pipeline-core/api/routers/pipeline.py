@@ -19,7 +19,9 @@ from sse_starlette.sse import EventSourceResponse
 from api.dependencies import get_event_bus
 from api.services.event_bus import EventBus, event_bus
 from agents.cognitive_chain import cognitive_chain
+from agents.batch_runner import batch_runner
 from schemas.spec import GeneratedSpecification
+from schemas.batch import BatchRunRequest, BatchRunStatus, SliceRunSummary
 
 log = logging.getLogger("PipelineRouter")
 
@@ -230,3 +232,51 @@ def get_pipeline_run(run_id: str) -> Dict[str, Any]:
         "spec": spec_data,
         "sha256_hash": spec_data.get("sha256_hash") if spec_data else run_info.get("sha256_hash") if run_info else None,
     }
+
+
+@router.post("/batches", response_model=BatchRunStatus, status_code=status.HTTP_202_ACCEPTED)
+async def start_batch_pipeline_run(
+    request: BatchRunRequest,
+    background_tasks: BackgroundTasks,
+) -> BatchRunStatus:
+    """
+    Initiates batch vertical slice extraction across multiple entry FQNs.
+    Slices execute concurrently under an asyncio Semaphore pool.
+    Returns the initial batch status containing all slice run_ids.
+    """
+    log.info("[PipelineRouter] Creating batch run for %d slices", len(request.entry_fqns))
+    batch_status = batch_runner.create_batch(request)
+
+    # Launch background batch execution
+    background_tasks.add_task(
+        batch_runner.execute_batch,
+        batch_id=batch_status.batch_id,
+        max_depth=request.max_depth,
+        tracker_type=request.tracker_type,
+        runs_registry_ref=RUNS_REGISTRY,
+    )
+
+    return batch_status
+
+
+@router.get("/batches/{batch_id}", response_model=BatchRunStatus)
+def get_batch_status(batch_id: str) -> BatchRunStatus:
+    """
+    Returns real-time batch execution progress and individual slice run statuses.
+    """
+    batch = batch_runner.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Batch run '{batch_id}' not found.",
+        )
+    return batch
+
+
+@router.get("/batches", response_model=List[BatchRunStatus])
+def list_batches() -> List[BatchRunStatus]:
+    """
+    Lists recent batch runs sorted newest first.
+    """
+    return batch_runner.list_batches()
+

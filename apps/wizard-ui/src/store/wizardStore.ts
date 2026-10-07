@@ -14,6 +14,7 @@ import {
 } from '../types/graph';
 import { apiClient } from '../services/api';
 import { GeneratedSpecification, PassState, PassStatus, TelemetryEvent } from '../types/telemetry';
+import { BatchRunStatus, SliceRunSummary } from '../types/batch';
 import { sseClient } from '../services/sseClient';
 
 export type EntrypointItem = EntryPoint;
@@ -122,14 +123,17 @@ interface WizardState {
   entrypoints: EntryPoint[];
   selectedEntrypoint: EntryPoint | null;
   selectedEntryPoint: EntryPoint | null;
+  selectedEntryPoints: Set<string>;
   sliceDepth: number;
   sliceData: VerticalSliceResponse | null;
   selectedNode: GraphNode | null;
   isGraphLoading: boolean;
   graphError: string | null;
 
-  // Screen 3: Telemetry
+  // Screen 3: Telemetry & Batch Console
   runId: string | null;
+  activeBatch: BatchRunStatus | null;
+  inspectedRunId: string | null;
   currentPass: 1 | 2 | 3 | null;
   passStates: Record<1 | 2 | 3, { status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'; latencyMs: number; tokens: number }>;
   terminalLogs: string[];
@@ -178,6 +182,12 @@ interface WizardState {
   proceedToExtraction: () => Promise<void>;
   extractAndProceed: () => Promise<void>;
   startExtraction: (entryFqn?: string, maxDepth?: number) => Promise<void>;
+  startBatchExtraction: () => Promise<void>;
+  toggleEntryPointSelection: (fqn: string) => void;
+  selectAllEntryPoints: (fqns: string[]) => void;
+  clearEntryPointSelection: () => void;
+  setInspectedRunId: (runId: string) => void;
+  pollBatchStatus: (batchId: string) => Promise<void>;
   appendTerminalToken: (token: string) => void;
   setPassCompleted: (passNumber: 1 | 2 | 3, stats: { latencyMs: number; tokens: number }) => void;
   completeExtraction: (spec: GeneratedSpecification) => void;
@@ -227,6 +237,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   entrypoints: [],
   selectedEntrypoint: null,
   selectedEntryPoint: null,
+  selectedEntryPoints: new Set<string>(),
   sliceDepth: 5,
   sliceData: null,
   selectedNode: null,
@@ -234,6 +245,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   graphError: null,
 
   runId: null,
+  activeBatch: null,
+  inspectedRunId: null,
   currentPass: null,
   passStates: {
     1: { status: 'PENDING', latencyMs: 0, tokens: 0 },
@@ -576,6 +589,146 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     set({ terminalLogs: [] });
   },
 
+  toggleEntryPointSelection: (fqn: string) => {
+    const current = new Set(get().selectedEntryPoints);
+    if (current.has(fqn)) {
+      current.delete(fqn);
+    } else {
+      current.add(fqn);
+    }
+    set({ selectedEntryPoints: current });
+  },
+
+  selectAllEntryPoints: (fqns: string[]) => {
+    set({ selectedEntryPoints: new Set(fqns) });
+  },
+
+  clearEntryPointSelection: () => {
+    set({ selectedEntryPoints: new Set() });
+  },
+
+  startBatchExtraction: async (): Promise<void> => {
+    const selectedFqns = Array.from(get().selectedEntryPoints);
+    const fqnsToRun =
+      selectedFqns.length > 0
+        ? selectedFqns
+        : get().selectedEntryPoint
+        ? [get().selectedEntryPoint!.fqn]
+        : [];
+
+    if (fqnsToRun.length === 0) return;
+
+    set({
+      isLoading: true,
+      isExtracting: true,
+      currentStep: 3,
+      maxCompletedStep: Math.max(get().maxCompletedStep, 2),
+    });
+    get().resetTelemetry();
+
+    try {
+      const batchStatus = await apiClient.startBatchRun(fqnsToRun, get().sliceDepth, 'jira');
+      const firstRunId = batchStatus.slices.length > 0 ? batchStatus.slices[0].run_id : null;
+
+      set({
+        activeBatch: batchStatus,
+        inspectedRunId: firstRunId,
+        runId: firstRunId,
+        isLoading: false,
+      });
+
+      if (firstRunId) {
+        get().setInspectedRunId(firstRunId);
+      }
+
+      get().pollBatchStatus(batchStatus.batch_id);
+    } catch (err) {
+      console.warn('Failed to start batch extraction:', err);
+      set({ isLoading: false });
+    }
+  },
+
+  setInspectedRunId: (runId: string) => {
+    set({
+      inspectedRunId: runId,
+      runId: runId,
+      terminalLogs: [],
+      currentPass: 1,
+      passStates: {
+        1: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+        2: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+        3: { status: 'PENDING', latencyMs: 0, tokens: 0 },
+      },
+    });
+
+    sseClient.disconnect();
+    sseClient.connect(
+      runId,
+      (event: TelemetryEvent) => {
+        get().appendTelemetry(event);
+
+        if (event.type === 'PASS_STARTED' && event.pass_number) {
+          const pNum = event.pass_number as 1 | 2 | 3;
+          set((state) => ({
+            currentPass: pNum,
+            passStates: {
+              ...state.passStates,
+              [pNum]: { ...state.passStates[pNum], status: 'RUNNING' },
+            },
+          }));
+        } else if (event.type === 'TOKEN_CHUNK' && event.token) {
+          get().appendTerminalToken(event.token);
+          if (event.pass && event.cumulative_tokens) {
+            const pNum = event.pass as 1 | 2 | 3;
+            set((state) => ({
+              passStates: {
+                ...state.passStates,
+                [pNum]: {
+                  ...state.passStates[pNum],
+                  tokens: event.cumulative_tokens || state.passStates[pNum].tokens,
+                },
+              },
+            }));
+          }
+        } else if (event.type === 'PASS_COMPLETED' && event.pass_number) {
+          get().setPassCompleted(event.pass_number as 1 | 2 | 3, {
+            latencyMs: event.latency_ms || 0,
+            tokens: event.tokens || 0,
+          });
+        } else if (event.type === 'EXTRACTION_COMPLETE' && event.spec) {
+          get().completeExtraction(event.spec);
+        }
+      },
+      (error) => {
+        console.warn(`[SSE] Stream warning for slice ${runId}:`, error);
+      }
+    );
+  },
+
+  pollBatchStatus: async (batchId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const updated = await apiClient.getBatchStatus(batchId);
+        set({ activeBatch: updated });
+
+        if (
+          updated.status === 'COMPLETED' ||
+          updated.status === 'PARTIAL_FAILURE' ||
+          updated.status === 'FAILED'
+        ) {
+          clearInterval(pollInterval);
+          set({
+            isExtracting: false,
+            isExtractionComplete: true,
+            maxCompletedStep: Math.max(get().maxCompletedStep, 3),
+          });
+        }
+      } catch (err) {
+        console.warn('[wizardStore] Batch polling error:', err);
+      }
+    }, 1500);
+  },
+
   proceedToExtraction: async (): Promise<void> => {
     return get().startExtraction();
   },
@@ -827,9 +980,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       maxCompletedStep: 1,
       monolithInfo: null,
       selectedEntrypoint: null,
+      selectedEntryPoint: null,
+      selectedEntryPoints: new Set<string>(),
       sliceData: null,
       selectedNode: null,
       runId: null,
+      activeBatch: null,
+      inspectedRunId: null,
       sseConnected: false,
       telemetryLogs: [],
       activePass: 1,

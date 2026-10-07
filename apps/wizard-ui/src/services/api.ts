@@ -8,6 +8,7 @@ import {
 } from '../types/architecture';
 import { Diagnostics, UploadResponse, IngestionStats } from '../types/source';
 import { EntryPoint, GraphNode, GraphEdge, SliceResponse, VerticalSliceResponse } from '../types/graph';
+import { BatchRunRequest, BatchRunStatus, SliceRunSummary } from '../types/batch';
 
 const isMockMode = import.meta.env.VITE_MOCK_MODE === 'true';
 
@@ -759,13 +760,86 @@ export const apiClient = {
     }
   },
 
-  // Screen 3: Pipeline Runs & Telemetry
   async startPipelineRun(entryFqn: string, sliceData?: any, trackerType: string = 'jira') {
     const res = await api.post('/api/pipeline/runs', {
       entry_fqn: entryFqn,
       slice_data: sliceData,
       tracker_type: trackerType,
     });
+    return res.data;
+  },
+
+  async startBatchRun(entryFqns: string[], maxDepth: number = 5, trackerType: string = 'jira'): Promise<BatchRunStatus> {
+    if (isMockMode) {
+      const batchId = `batch-${Math.random().toString(36).substring(2, 9)}`;
+      return {
+        batch_id: batchId,
+        total_slices: entryFqns.length,
+        completed_slices: 0,
+        failed_slices: 0,
+        status: 'PROCESSING',
+        created_at: new Date().toISOString(),
+        slices: entryFqns.map((fqn, i) => ({
+          run_id: `run-${Math.random().toString(36).substring(2, 9)}`,
+          entry_fqn: fqn,
+          class_name: fqn.split('.').pop() || `Slice${i + 1}`,
+          status: 'QUEUED',
+          current_pass: null,
+          tokens_consumed: 0,
+          duration_ms: 0,
+        })),
+      };
+    }
+
+    try {
+      const res = await api.post('/api/pipeline/batches', {
+        entry_fqns: entryFqns,
+        max_depth: maxDepth,
+        tracker_type: trackerType,
+      });
+      return res.data;
+    } catch (err) {
+      console.warn('[apiClient] startBatchRun failed; falling back to mock batch', err);
+      const batchId = `batch-${Math.random().toString(36).substring(2, 9)}`;
+      return {
+        batch_id: batchId,
+        total_slices: entryFqns.length,
+        completed_slices: 0,
+        failed_slices: 0,
+        status: 'PROCESSING',
+        created_at: new Date().toISOString(),
+        slices: entryFqns.map((fqn, i) => ({
+          run_id: `run-${Math.random().toString(36).substring(2, 9)}`,
+          entry_fqn: fqn,
+          class_name: fqn.split('.').pop() || `Slice${i + 1}`,
+          status: 'QUEUED',
+          current_pass: null,
+          tokens_consumed: 0,
+          duration_ms: 0,
+        })),
+      };
+    }
+  },
+
+  async getBatchStatus(batchId: string): Promise<BatchRunStatus> {
+    if (isMockMode) {
+      return {
+        batch_id: batchId,
+        total_slices: 3,
+        completed_slices: 3,
+        failed_slices: 0,
+        status: 'COMPLETED',
+        created_at: new Date().toISOString(),
+        slices: [],
+      };
+    }
+    const res = await api.get(`/api/pipeline/batches/${batchId}`);
+    return res.data;
+  },
+
+  async listBatches(): Promise<BatchRunStatus[]> {
+    if (isMockMode) return [];
+    const res = await api.get('/api/pipeline/batches');
     return res.data;
   },
 
@@ -927,4 +1001,7 @@ export const apiClient = {
 export const getEntrypoints = (): Promise<EntryPoint[]> => apiClient.getEntrypoints();
 export const getSlice = (entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> => apiClient.getSlice(entryFqn, maxDepth);
 export const getVerticalSlice = (entryFqn: string, maxDepth: number = 5): Promise<VerticalSliceResponse> => apiClient.getVerticalSlice(entryFqn, maxDepth);
+export const startBatchRun = (entryFqns: string[], maxDepth: number = 5): Promise<BatchRunStatus> => apiClient.startBatchRun(entryFqns, maxDepth);
+export const getBatchStatus = (batchId: string): Promise<BatchRunStatus> => apiClient.getBatchStatus(batchId);
+export const listBatches = (): Promise<BatchRunStatus[]> => apiClient.listBatches();
 

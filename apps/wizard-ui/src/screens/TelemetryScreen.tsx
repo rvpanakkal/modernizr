@@ -18,11 +18,14 @@ import {
   Layers,
   Sparkles,
   ShieldAlert,
+  Eye,
 } from 'lucide-react';
 
 export const TelemetryScreen: React.FC = () => {
   const {
     runId,
+    activeBatch,
+    inspectedRunId,
     selectedEntryPoint,
     activeProfile,
     currentPass,
@@ -35,6 +38,7 @@ export const TelemetryScreen: React.FC = () => {
     sseConnected,
     currentSpec,
     startExtraction,
+    setInspectedRunId,
     clearTerminalLogs,
     setStep,
   } = useWizardStore();
@@ -46,12 +50,12 @@ export const TelemetryScreen: React.FC = () => {
   const [isAutoAdvancePaused, setIsAutoAdvancePaused] = useState<boolean>(false);
   const countdownTimerRef = useRef<any>(null);
 
-  // Auto-initiate extraction if not already running or completed
+  // Auto-initiate extraction if not already running or completed and not in batch mode
   useEffect(() => {
-    if (!runId && !isExtracting && !isExtractionComplete) {
+    if (!runId && !isExtracting && !isExtractionComplete && !activeBatch) {
       startExtraction();
     }
-  }, [runId, isExtracting, isExtractionComplete, startExtraction]);
+  }, [runId, isExtracting, isExtractionComplete, activeBatch, startExtraction]);
 
   // Terminal auto-scrolling
   useEffect(() => {
@@ -119,7 +123,10 @@ export const TelemetryScreen: React.FC = () => {
     return 'text-rose-400';
   };
 
+  const inspectedSlice = activeBatch?.slices.find((s) => s.run_id === inspectedRunId);
+
   const activeTargetName =
+    inspectedSlice?.class_name ||
     selectedEntryPoint?.class_name ||
     selectedEntryPoint?.simple_name ||
     selectedEntryPoint?.fqn?.split('.').pop() ||
@@ -183,8 +190,18 @@ export const TelemetryScreen: React.FC = () => {
           {/* Run ID HUD */}
           <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
             <span className="text-slate-500">Run:</span>
-            <strong className="text-sky-300">#{runId || 'run-init'}</strong>
+            <strong className="text-sky-300">#{inspectedRunId || runId || 'run-init'}</strong>
           </div>
+
+          {/* Batch Status HUD */}
+          {activeBatch && (
+            <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
+              <span className="text-slate-500">Batch:</span>
+              <strong className="text-sky-300">
+                {activeBatch.completed_slices}/{activeBatch.total_slices} Done
+              </strong>
+            </div>
+          )}
 
           {/* Target HUD */}
           <div className="flex items-center gap-1.5 text-xs font-mono text-slate-300 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
@@ -208,7 +225,7 @@ export const TelemetryScreen: React.FC = () => {
           {isExtractionComplete ? (
             <div className="flex items-center gap-2 px-3 py-1 bg-emerald-950/80 border border-emerald-800/80 rounded-full text-emerald-400 text-xs font-mono font-bold shadow-sm">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              <span>EXTRACTION SEALED</span>
+              <span>{activeBatch ? 'BATCH EXTRACTION SEALED' : 'EXTRACTION SEALED'}</span>
             </div>
           ) : isExtracting || sseConnected ? (
             <div className="flex items-center gap-2 px-3 py-1 bg-sky-950/80 border border-sky-800/80 rounded-full text-sky-400 text-xs font-mono font-bold shadow-sm animate-pulse">
@@ -216,7 +233,7 @@ export const TelemetryScreen: React.FC = () => {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
-              <span>LIVE SSE STREAM</span>
+              <span>{activeBatch ? 'LIVE BATCH SSE STREAM' : 'LIVE SSE STREAM'}</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 border border-slate-800 rounded-full text-slate-500 text-xs font-mono">
@@ -226,6 +243,102 @@ export const TelemetryScreen: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 1.5 BATCH QUEUE MATRIX & ACTIVE STREAM SWITCHER */}
+      {activeBatch && activeBatch.slices.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <Layers className="h-4 w-4 text-sky-400" />
+              <span className="font-bold text-slate-200">BATCH QUEUE MATRIX</span>
+              <span className="text-slate-500 text-[11px]">
+                ({activeBatch.completed_slices} of {activeBatch.total_slices} slices complete)
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono">
+              <span className="text-slate-400">Batch ID:</span>
+              <span className="text-sky-300 font-bold">#{activeBatch.batch_id.slice(0, 10)}</span>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                  activeBatch.status === 'COMPLETED'
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                    : activeBatch.status === 'PARTIAL_FAILURE'
+                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                    : activeBatch.status === 'FAILED'
+                    ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                    : 'bg-sky-950 text-sky-400 border border-sky-800 animate-pulse'
+                }`}
+              >
+                {activeBatch.status}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+            {activeBatch.slices.map((slice) => {
+              const isInspected =
+                slice.run_id === inspectedRunId || (slice.run_id === runId && !inspectedRunId);
+              return (
+                <button
+                  key={slice.run_id}
+                  onClick={() => setInspectedRunId(slice.run_id)}
+                  className={`p-2.5 rounded-lg border text-left transition-all duration-200 flex flex-col justify-between ${
+                    isInspected
+                      ? 'bg-sky-950/70 border-sky-500 ring-1 ring-sky-500/50 shadow-md shadow-sky-500/10'
+                      : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                    <span
+                      className="font-mono text-xs font-bold text-white truncate max-w-[150px]"
+                      title={slice.class_name}
+                    >
+                      {slice.class_name}
+                    </span>
+                    {isInspected && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono font-bold text-sky-300 bg-sky-900/80 px-1.5 py-0.5 rounded border border-sky-700/60 shrink-0">
+                        <Eye className="h-2.5 w-2.5" />
+                        Active View
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    {slice.status === 'RUNNING' && (
+                      <span className="flex items-center gap-1 text-sky-400 font-semibold animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {slice.current_pass ? `Pass ${slice.current_pass}` : 'Running'}
+                      </span>
+                    )}
+                    {slice.status === 'COMPLETED' && (
+                      <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Completed
+                      </span>
+                    )}
+                    {slice.status === 'QUEUED' && (
+                      <span className="flex items-center gap-1 text-slate-500">
+                        <Clock className="h-3 w-3" />
+                        Queued
+                      </span>
+                    )}
+                    {slice.status === 'FAILED' && (
+                      <span className="flex items-center gap-1 text-rose-400 font-semibold">
+                        <AlertTriangle className="h-3 w-3" />
+                        Failed
+                      </span>
+                    )}
+
+                    <span className="text-slate-400 text-[10px]">
+                      {slice.tokens_consumed > 0 ? `${slice.tokens_consumed.toLocaleString()} tok` : '--'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 2. 3-CARD VISUAL STEPPER */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
@@ -388,7 +501,7 @@ export const TelemetryScreen: React.FC = () => {
           <div className="flex items-center justify-between font-mono text-xs">
             <span className="text-slate-400 flex items-center gap-1.5">
               <Activity className="h-3.5 w-3.5 text-sky-400" />
-              Cumulative Generation Tokens:
+              {activeBatch ? 'Inspected Slice Tokens:' : 'Cumulative Generation Tokens:'}
             </span>
             <span className={`font-bold ${getTokenTextColor()}`}>
               {totalTokens.toLocaleString()} / {maxTokens.toLocaleString()} budget
@@ -404,13 +517,47 @@ export const TelemetryScreen: React.FC = () => {
 
           <div className="flex items-center justify-between font-mono text-[10px] text-slate-500">
             <span>{tokenPercentage}% of 6k budget</span>
-            <span>Active Pass Latency: {activePassLatency.toLocaleString()} ms</span>
+            {activeBatch ? (
+              <span className="text-slate-400 font-semibold">
+                Batch: {activeBatch.completed_slices}/{activeBatch.total_slices} Completed
+              </span>
+            ) : (
+              <span>Active Pass Latency: {activePassLatency.toLocaleString()} ms</span>
+            )}
           </div>
         </div>
 
         {/* Auto-Advance Banner & Proceed CTA */}
         <div className="flex items-center gap-3">
-          {isExtractionComplete ? (
+          {activeBatch ? (
+            activeBatch.status === 'COMPLETED' ||
+            activeBatch.status === 'PARTIAL_FAILURE' ||
+            isExtractionComplete ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 text-xs font-mono flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>
+                    All Specs Ready ({activeBatch.completed_slices}/{activeBatch.total_slices})
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setStep(4)}
+                  className="flex items-center gap-2 py-2 px-4 rounded-lg font-bold text-xs text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-md shadow-emerald-500/20 transition cursor-pointer"
+                >
+                  <span>Proceed to HITL Review (All Specs Ready)</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs font-mono text-slate-400 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
+                <span>
+                  Batch Running: {activeBatch.completed_slices} / {activeBatch.total_slices} slices completed (3-worker pool)...
+                </span>
+              </div>
+            )
+          ) : isExtractionComplete ? (
             <div className="flex flex-wrap items-center gap-2">
               <div className="px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 text-xs font-mono flex items-center gap-2">
                 <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
